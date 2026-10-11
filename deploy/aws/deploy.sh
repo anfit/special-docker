@@ -13,7 +13,10 @@ STACK_DIR="$HOME_DIR/stack"
 # shellcheck disable=SC1091
 source "$HOME_DIR/instance.env"   # SPECIAL_DOMAIN, SPECIAL_AWS_REGION, SPECIAL_DYNAMODB_TABLE, SPECIAL_IMAGE_REPO, SPECIAL_LOG_GROUP, SPECIAL_SSM_PREFIX
 
-IMAGE="$SPECIAL_IMAGE_REPO:$TAG"
+case "$TAG" in
+    sha256:*) IMAGE="$SPECIAL_IMAGE_REPO@$TAG" ;;   # immutable digest
+    *)        IMAGE="$SPECIAL_IMAGE_REPO:$TAG" ;;
+esac
 REGISTRY="${SPECIAL_IMAGE_REPO%%/*}"
 
 # Registry authentication is a host concern. A host may provide /opt/special/registry-login.sh
