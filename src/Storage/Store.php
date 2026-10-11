@@ -19,7 +19,7 @@ namespace Special\Storage;
  *
  * Row shapes
  * ----------
- * user:     id, username, password_hash, role, enabled, version, created_at, updated_at, last_login_at
+ * user:     id, username, password_hash, role, enabled, must_change_password, version, created_at, updated_at, last_login_at
  * spec:     id, title, description, body, project_name, status, visibility, revision,
  *           created_by, updated_by, created_at, updated_at, deleted_at
  * audit:    action, entity_type, entity_id, actor_user_id, metadata (array), request_id, client_id, created_at
@@ -73,6 +73,20 @@ interface Store
 
     /** @param array<string, mixed> $audit */
     public function recordLogin(int $id, string $at, array $audit): void;
+
+    /** True while the system has no administrator and the one-shot bootstrap has not run. */
+    public function needsSetup(): bool;
+
+    /** @return array{token_hash: string, expires_at: string}|null */
+    public function getSetupToken(): ?array;
+
+    /**
+     * Store the hash of a freshly generated setup token unless a still-valid one exists.
+     * Returns true only for the caller that created it (that caller reports the plaintext).
+     */
+    public function createSetupToken(string $tokenHash, string $expiresAt, string $now): bool;
+
+    public function deleteSetupToken(): void;
 
     // ---------------------------------------------------------------- specs
 

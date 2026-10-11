@@ -54,12 +54,12 @@ The original used PDO directly in every service and explicitly refused a reposit
 
 ## ADR-013: Docker on a single EC2 instance, DynamoDB for persistence
 
-- **Wrapper:** a Docker image (PHP 8.3 + Apache) deployed with Docker Compose behind Caddy. There is no VPS-deployer, no host-installed PHP and no deployer metadata in this repository.
+- **Wrapper:** a Docker image (PHP 8.3 + Apache) deployed with Docker Compose. There is no VPS-deployer, no host-installed PHP and no deployer metadata in this repository.
 - **Host:** one EC2 instance. It is the simplest AWS shape that matches "docker runs on its own EC2". ECS/Fargate, App Runner or Lambda would also fit and would remove the host to patch, at the cost of more moving parts (load balancer, task definitions) than a small internal tool needs. The `Store` boundary and the image make that move straightforward later. Because sessions are files and TLS is on the instance, **horizontal scaling is out of scope** (ADR-014).
 - **Persistence:** DynamoDB, pre-defined by CloudFormation (never created implicitly in production), on-demand billing, point-in-time recovery, deletion protection. One table, two GSIs: see [`DYNAMODB.md`](DYNAMODB.md).
 - **Identity to AWS:** the EC2 instance role only. No access keys in the image, compose file or environment.
 - **Secrets:** the application key is an SSM `SecureString`, read at deploy time.
-- **TLS:** Caddy with automatic Let's Encrypt certificates, rather than ACM + a load balancer, to avoid the ALB's fixed monthly cost for a single-instance service.
+- **TLS:** see ADR-020. The application never terminates TLS.
 - **AWS SDK:** the original project had no Composer step. The official `aws/aws-sdk-php` is used for DynamoDB because it implements request signing, instance-profile credentials, retries and error models correctly; hand-rolling SigV4 is a security-sensitive liability. It is installed during the image build and loaded lazily (tests that use the in-memory store do not need it). Parsedown remains vendored.
 
 ## ADR-014: PHP file sessions on a Docker volume
@@ -87,3 +87,17 @@ A DynamoDB item is limited to 400 KB. The service accepts at most 100,000 charac
 ## ADR-019: Entra-ready, not Entra-now
 
 Local users stay for now. The seams for replacing them (single password check, role on the principal, integer user ids, schemaless user items) are listed in [`ENTRA.md`](ENTRA.md); nothing in this fork builds Entra support yet.
+
+## ADR-020: TLS terminates at an ALB with an ACM certificate; the app speaks HTTP
+
+The first cut bundled Caddy with Let's Encrypt on the instance. That assumes a public host with open ports and does not fit a corporate setup where certificates are issued and owned elsewhere, or where TLS is attached *after* the first deployment. It was removed. The container now serves plain HTTP on port 80 and the standard deployment puts an **Application Load Balancer with an ACM certificate** in front (ACM-issued or imported from the corporate CA). The instance accepts traffic only from the ALB's security group, and the ALB health-checks `/health`.
+
+To keep "deploy now, attach TLS later" possible, the instance is closed by default and reachable through an SSM port-forward, and `SPECIAL_INSECURE_HTTP=1` lets production run over HTTP during that period (reported by `/health`). `SPECIAL_PUBLIC_BASE_URL` should be the final HTTPS name from the start because OAuth resources, issuer and share links derive from it. `SPECIAL_TRUSTED_PROXY_HOPS` says how many trusted proxies append to `X-Forwarded-For` (1 for the ALB). Encryption on the ALB-to-instance hop is not provided; it stays inside the VPC.
+
+## ADR-021: Web first-run setup guarded by a one-time token
+
+While no administrator exists, `/` and `/login` redirect to `/setup`. Because the system may be reachable from a network before anyone has configured it, setup requires a **setup token**: generated on first visit, stored only as a hash with a 24-hour expiry, and written once to the application log (CloudWatch). `SPECIAL_SETUP_TOKEN` overrides generation for automation. Attempts are throttled like logins, the page returns 404 once an administrator exists, and the same DynamoDB marker that guards the CLI bootstrap makes creation atomic. The CLI remains as a fallback.
+
+## ADR-022: Administrator password reset with forced change
+
+An administrator can reset another user's password. The service sets a random temporary password (shown once), marks the user `must_change_password`, signs them out everywhere and revokes their MCP tokens. A flagged user can reach only the account page until they choose a new password, and cannot obtain MCP access in the meantime. Entra will make this moot for federated users.

@@ -87,7 +87,11 @@ if ($path === '/health') {
     try {
         special_store($config)->ping();
         http_response_code(200);
-        echo json_encode(['status' => 'ok'], JSON_THROW_ON_ERROR);
+        $health = ['status' => 'ok', 'version' => $config['version'], 'commit' => $config['commit']];
+        if ($config['insecure_http'] === true) {
+            $health['warnings'] = ['insecure_http'];
+        }
+        echo json_encode($health, JSON_THROW_ON_ERROR);
     } catch (Throwable) {
         http_response_code(503);
         echo json_encode(['status' => 'unavailable'], JSON_THROW_ON_ERROR);
@@ -138,6 +142,11 @@ $idFromSegments = static function (int $index) use ($segments): int {
     return (int) $value;
 };
 
+// A user whose password was reset by an administrator may only reach the account page until they change it.
+if ($principal !== null && $principal->mustChangePassword && !in_array($path, ['/account', '/account/password', '/logout'], true)) {
+    special_redirect('/account');
+}
+
 $render = static function (string $view, array $data = [], int $status = 200) use ($principal, $flash): void {
     special_render($view, array_merge(['principal' => $principal, 'flash' => $flash], $data), $status);
 };
@@ -153,7 +162,41 @@ $appendQuery = static function (string $uri, array $params): string {
 
 try {
     if ($path === '/' && $method === 'GET') {
-        special_redirect($principal === null ? '/login' : '/specs');
+        special_redirect($principal === null ? ($security->needsSetup() ? '/setup' : '/login') : '/specs');
+    }
+
+    if ($path === '/setup') {
+        if ($principal !== null || !$security->needsSetup()) {
+            throw new SpecialException('NOT_FOUND', 'Not found.', 404);
+        }
+        if ($method === 'GET') {
+            $security->ensureSetupToken();
+            $render('setup', ['title' => 'First-run setup', 'error' => null, 'username' => '', 'tokenFromEnvironment' => (string) $config['setup_token'] !== '']);
+            exit;
+        }
+        if ($method !== 'POST') {
+            throw new SpecialException('INVALID_ARGUMENT', 'Method not allowed.', 405);
+        }
+        special_require_csrf(special_form_string('csrf'));
+        $setupUsername = special_form_string('username', '') ?? '';
+        try {
+            $password = special_form_string('password', '') ?? '';
+            if (!hash_equals($password, special_form_string('password_confirm', '') ?? '')) {
+                throw new SpecialException('INVALID_ARGUMENT', 'The two passwords do not match.', 422);
+            }
+            $created = $security->completeSetup($setupUsername, $password, special_form_string('token', '') ?? '', special_client_ip($config), $requestId);
+        } catch (SpecialException $exception) {
+            if ($exception->errorCode() === 'NOT_FOUND') {
+                throw $exception;
+            }
+            $render('setup', ['title' => 'First-run setup', 'error' => $exception->getMessage(), 'username' => $setupUsername, 'tokenFromEnvironment' => (string) $config['setup_token'] !== ''], $exception->httpStatus() >= 500 ? 500 : $exception->httpStatus());
+            exit;
+        }
+        session_regenerate_id(true);
+        $_SESSION['user_id'] = $created->id;
+        $_SESSION['_csrf'] = special_b64url_encode(random_bytes(32));
+        special_flash('Setup complete. You are signed in as the administrator.', 'info');
+        special_redirect('/specs');
     }
 
     if ($path === '/.well-known/oauth-protected-resource' || $path === '/.well-known/oauth-protected-resource/mcp') {
@@ -273,6 +316,9 @@ try {
     if ($path === '/login') {
         if ($principal !== null) {
             special_redirect('/specs');
+        }
+        if ($security->needsSetup()) {
+            special_redirect('/setup');
         }
         $returnTo = special_safe_return_to($_GET['return_to'] ?? $_POST['return_to'] ?? null);
         if ($method === 'GET') {
@@ -494,6 +540,12 @@ try {
             $security->changeRole($actor, $userId, special_form_string('role', '') ?? '', $requestId);
             special_flash('Role updated.', 'info');
             special_redirect('/admin/users');
+        }
+        if ($segments[3] === 'reset-password') {
+            $reset = $security->resetPassword($actor, $userId, $requestId);
+            header('Cache-Control: no-store');
+            $render('admin-password-reset', ['title' => 'Temporary password', 'resetUser' => $reset['user'], 'temporaryPassword' => $reset['temporary_password']]);
+            exit;
         }
         if ($segments[3] === 'enabled') {
             $security->setEnabled($actor, $userId, special_form_string('enabled') === '1', $requestId);

@@ -30,6 +30,7 @@ final class MemoryStore implements Store
         return [
             'counters' => ['spec' => 0, 'user' => 0, 'enabled_admins' => 0],
             'bootstrap_done' => false,
+            'setup_token' => null,
             'users' => [],
             'usernames' => [],
             'specs' => [],
@@ -90,6 +91,7 @@ final class MemoryStore implements Store
             'password_hash' => (string) $user['password_hash'],
             'role' => (string) $user['role'],
             'enabled' => (bool) ($user['enabled'] ?? true),
+            'must_change_password' => false,
             'version' => 1,
             'created_at' => $now,
             'updated_at' => $now,
@@ -161,6 +163,38 @@ final class MemoryStore implements Store
             $this->state['users'][$id]['last_login_at'] = $at;
         }
         $this->appendAudit($audit);
+        $this->save();
+    }
+
+    public function needsSetup(): bool
+    {
+        $this->load();
+        return !$this->state['bootstrap_done'] && $this->state['counters']['enabled_admins'] < 1;
+    }
+
+    public function getSetupToken(): ?array
+    {
+        $this->load();
+        return $this->state['setup_token'] ?? null;
+    }
+
+    public function createSetupToken(string $tokenHash, string $expiresAt, string $now): bool
+    {
+        $this->load();
+        $current = $this->state['setup_token'] ?? null;
+        if ($current !== null && strcmp((string) $current['expires_at'], $now) > 0) {
+            return false;
+        }
+        $this->state['setup_token'] = ['token_hash' => $tokenHash, 'expires_at' => $expiresAt];
+        $this->save();
+
+        return true;
+    }
+
+    public function deleteSetupToken(): void
+    {
+        $this->load();
+        unset($this->state['setup_token']);
         $this->save();
     }
 

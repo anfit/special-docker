@@ -48,6 +48,7 @@ final class Principal
         public readonly ?array $scopes = null,
         public readonly string $source = 'web',
         public readonly ?string $clientId = null,
+        public readonly bool $mustChangePassword = false,
     ) {
     }
 

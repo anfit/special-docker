@@ -6,7 +6,7 @@ Special is a deliberately narrow application for collecting and managing specifi
 
 1. **Docker is the deployment wrapper**: an image built from this repository; no VPS-deployer, no host-installed PHP or database.
 2. **Specs are public unless explicitly made private.** Every signed-in user sees public specs in the main listing and in the project list; private specs are visible only to their author.
-3. **AWS is the target**: Docker runs on its own EC2 instance and **all persistence is a pre-defined DynamoDB table**.
+3. **AWS is the target**: Docker runs on its own EC2 instance behind an ALB (which terminates TLS with an ACM certificate) and **all persistence is a pre-defined DynamoDB table**. The container speaks plain HTTP and never handles certificates.
 4. **Entra ID is the planned identity provider**; local users are the stepping stone ([`docs/ENTRA.md`](docs/ENTRA.md)).
 
 ## Where to start
@@ -20,11 +20,12 @@ Special is a deliberately narrow application for collecting and managing specifi
 | configure or operate it | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | know why things are the way they are | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 | plan the move to Entra | [`docs/ENTRA.md`](docs/ENTRA.md) |
+| put it behind the corporate load balancer / TLS | [`docs/EDGE_INTEGRATION.md`](docs/EDGE_INTEGRATION.md) |
 | connect an MCP client | [`docs/MCP_CONTRACT.md`](docs/MCP_CONTRACT.md), [`docs/OAUTH.md`](docs/OAUTH.md) |
 
 ## Behaviour in one paragraph
 
-Spec bodies are authored and stored as Markdown source. The browser renders them with pinned Parsedown 1.8.0 in safe mode (raw HTML escaped, links limited to HTTP(S)), while MCP responses and the copy button use the unchanged source. A spec is `public` by default; the author can switch it to `private` at any time and only the author can edit or delete it. A signed `/share/{token}` permalink grants anyone holding it a read-only view of a spec, public or private. MCP tools: `list_specs`, `list_projects`, `get_spec`, `create_spec`, `update_spec`, `delete_spec`.
+Spec bodies are authored and stored as Markdown source. The browser renders them with pinned Parsedown 1.8.0 in safe mode (raw HTML escaped, links limited to HTTP(S)), while MCP responses and the copy button use the unchanged source. A spec is `public` by default; the author can switch it to `private` at any time and only the author can edit or delete it. A signed `/share/{token}` permalink grants anyone holding it a read-only view of a spec, public or private. MCP tools: `list_specs`, `list_projects`, `get_spec`, `create_spec`, `update_spec`, `delete_spec`. The first administrator is created on a token-guarded web setup page; administrators can reset a user's password (the user must then choose a new one); the footer and `/health` show the deployed version.
 
 ## Run it locally
 
@@ -32,10 +33,9 @@ Prerequisite: Docker. No AWS account is needed; the stack includes DynamoDB Loca
 
 ```text
 docker compose up --build
-docker compose exec -e SPECIAL_BOOTSTRAP_ADMIN_PASSWORD="a-long-passphrase" app php scripts/bootstrap-admin.php --username admin
 ```
 
-Browse <http://localhost:8080> and sign in as `admin`. Data persists in Docker volumes until `docker compose down -v`.
+Browse <http://localhost:8080>. The first visit redirects to the first-run setup page; the setup token for this local stack is `local-development-setup-token`. Data persists in Docker volumes until `docker compose down -v`.
 
 ## Layout
 
@@ -45,7 +45,7 @@ scripts/                       bootstrap-admin, register-oauth-client, init-tabl
 tests/                         PHP behaviour suite + Python contract tests
 Dockerfile docker-compose.yml  image and local stack
 docker/                        Apache vhost, php.ini, entrypoint
-deploy/aws/                    CloudFormation stack, production compose, Caddyfile, deploy/push scripts
+deploy/aws/                    CloudFormation stack, production compose, deploy/push scripts
 docs/ spec/                    documentation and the product/architecture spec
 ```
 

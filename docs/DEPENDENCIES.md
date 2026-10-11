@@ -24,4 +24,4 @@ When upgrading Parsedown, replace the vendored source and licence from an upstre
 ## Base images
 
 - `php:8.3-apache` (runtime) and `composer:2` (build stage): rebuild regularly for security fixes.
-- `caddy:2` and `amazon/dynamodb-local` (compose files only).
+- `amazon/dynamodb-local` (local compose file only).

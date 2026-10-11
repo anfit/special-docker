@@ -525,6 +525,101 @@ test('MCP exposes project listing and visibility-aware spec tools', function (En
     same('FORBIDDEN', $denied['error']['data']['code'], 'non-author update refused over MCP');
 });
 
+// ------------------------------------------------------------------ first-run setup & password reset
+
+test('setup token storage is create-once until it expires', function (Env $env): void {
+    $store = new Special\Storage\MemoryStore();
+    $now = Special\special_now();
+    check($store->createSetupToken('h1', Special\special_now(60), $now), 'first create wins');
+    check(!$store->createSetupToken('h2', Special\special_now(60), $now), 'second create refused while valid');
+    same('h1', $store->getSetupToken()['token_hash'], 'first token kept');
+    check($store->createSetupToken('h3', Special\special_now(120), Special\special_now(61)), 'expired token is replaced');
+    $store->deleteSetupToken();
+    same(null, $store->getSetupToken(), 'deleted');
+    // The active store honours the same contract.
+    $env->store->deleteSetupToken();
+    check($env->store->createSetupToken('x1', Special\special_now(60), Special\special_now()), 'active store: create');
+    check(!$env->store->createSetupToken('x2', Special\special_now(60), Special\special_now()), 'active store: create once');
+    $env->store->deleteSetupToken();
+});
+
+test('web setup: generated token gates the first administrator, then the page is gone', function (Env $env): void {
+    $log = tempnam(sys_get_temp_dir(), 'setup');
+    $previous = ini_set('error_log', $log);
+    try {
+        $fresh = new Env(new Special\Storage\MemoryStore());
+        check($fresh->security->needsSetup(), 'empty system needs setup');
+        $fresh->security->ensureSetupToken();
+        $fresh->security->ensureSetupToken();
+        $logged = (string) file_get_contents($log);
+        same(1, substr_count($logged, 'setup token'), 'token logged exactly once');
+        preg_match('/: (\S+)\s*$/m', $logged, $matches);
+        $token = $matches[1] ?? '';
+        check(strlen($token) >= 20, 'token captured from the log');
+
+        throws('UNAUTHENTICATED', fn () => $fresh->security->completeSetup('first@example.test', 'a long enough password', 'wrong-token', '203.0.113.7'), 'wrong token');
+        throws('INVALID_ARGUMENT', fn () => $fresh->security->completeSetup('first@example.test', 'short', $token, '203.0.113.7'), 'right token, weak password');
+        $admin = $fresh->security->completeSetup('first@example.test', 'a long enough password', $token, '203.0.113.7');
+        same('admin', $admin->role, 'first user is an administrator');
+        check(!$fresh->security->needsSetup(), 'setup is over');
+        throws('NOT_FOUND', fn () => $fresh->security->completeSetup('second@example.test', 'a long enough password', $token, '203.0.113.7'), 'cannot run twice');
+        same(null, $fresh->store->getSetupToken(), 'token consumed');
+        $fresh->security->authenticate('first@example.test', 'a long enough password', '203.0.113.7');
+        $created = array_values(array_filter($fresh->store->listAudit('user', 1), static fn (array $entry): bool => $entry['action'] === 'user.bootstrap_admin_created'));
+        same('web-setup', $created[0]['metadata']['via'] ?? null, 'audit records the web path');
+    } finally {
+        ini_set('error_log', $previous === false ? '' : $previous);
+        @unlink($log);
+    }
+});
+
+test('web setup: a configured token replaces generation and failures are throttled', function (Env $env): void {
+    $store = new Special\Storage\MemoryStore();
+    $config = $env->config;
+    $config['setup_token'] = 'configured-setup-token-123456';
+    $security = new Security($store, $config);
+    $security->ensureSetupToken();
+    same(null, $store->getSetupToken(), 'nothing generated when configured');
+    for ($i = 0; $i < 3; $i++) {
+        throws('UNAUTHENTICATED', fn () => $security->completeSetup('first@example.test', 'a long enough password', 'guess-' . $i, '198.51.100.20'));
+    }
+    throws('UNAUTHENTICATED', fn () => $security->completeSetup('first@example.test', 'a long enough password', 'configured-setup-token-123456', '198.51.100.20'), 'blocked even with the right token');
+    $admin = $security->completeSetup('first@example.test', 'a long enough password', 'configured-setup-token-123456', '198.51.100.21');
+    same('admin', $admin->role, 'other address succeeds');
+});
+
+test('admin password reset forces a change and cuts off old credentials', function (Env $env): void {
+    $admin = $env->admin();
+    $user = $env->user();
+    $client = $env->name('c');
+    $env->oauth->registerClient($client, 'Test', ['https://client.example.test/cb']);
+    $verifier = static fn (): string => rtrim(strtr(base64_encode(random_bytes(40)), '+/', '-_'), '=');
+    $tokens = oauth_tokens($env, $user, $client, $verifier());
+    check($env->security->principalFromBearer($tokens['access_token']) !== null, 'token works before reset');
+
+    throws('INVALID_ARGUMENT', fn () => $env->security->resetPassword($admin, $admin->id), 'self reset refused');
+    throws('FORBIDDEN', fn () => $env->security->resetPassword($user, $admin->id), 'non-admin refused');
+    $result = $env->security->resetPassword($admin, $user->id, 'req-test');
+    $temporary = $result['temporary_password'];
+    check(strlen($temporary) >= 12, 'temporary password is long enough');
+    check($result['user']['must_change_password'] === true, 'flag set');
+    same(null, $env->security->principalFromBearer($tokens['access_token']), 'old MCP token revoked');
+
+    throws('UNAUTHENTICATED', fn () => $env->security->authenticate($user->username, 'a long enough password', '192.0.2.50'), 'old password dead');
+    $signedIn = $env->security->authenticate($user->username, $temporary, '192.0.2.50');
+    check($signedIn->mustChangePassword, 'principal carries the flag');
+
+    $second = oauth_tokens($env, $user, $client, $verifier());
+    same(null, $env->security->principalFromBearer($second['access_token']), 'MCP stays closed until the password is changed');
+
+    $env->security->changePassword($signedIn, $user->id, 'my own new password');
+    $after = $env->security->authenticate($user->username, 'my own new password', '192.0.2.50');
+    check(!$after->mustChangePassword, 'flag cleared by the change');
+    $third = oauth_tokens($env, $user, $client, $verifier());
+    check($env->security->principalFromBearer($third['access_token']) !== null, 'MCP works again');
+    check(in_array('user.password_reset', array_column($env->store->listAudit('user', $user->id), 'action'), true), 'reset is audited');
+});
+
 // ------------------------------------------------------------------ runner
 
 $cleanup = static function (): void {

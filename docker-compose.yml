@@ -1,9 +1,9 @@
 # Local development stack: the app plus DynamoDB Local.
 #
 #   docker compose up --build
-#   docker compose exec app php scripts/bootstrap-admin.php --username admin   # needs SPECIAL_BOOTSTRAP_ADMIN_PASSWORD
 #
-# Then browse http://localhost:8080. Data lives in the "dynamodb-data" volume; `docker compose down -v` wipes it.
+# Then browse http://localhost:8080: the first visit redirects to /setup; the setup token for this local
+# stack is `local-development-setup-token`. Data lives in the "dynamodb-data" volume; `docker compose down -v` wipes it.
 # For AWS see docs/AWS_SETUP.md; production uses deploy/aws/compose.prod.yml instead of this file.
 
 services:
@@ -34,8 +34,8 @@ services:
       SPECIAL_AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local
       AWS_SECRET_ACCESS_KEY: local
+      SPECIAL_SETUP_TOKEN: local-development-setup-token
       SPECIAL_AUTO_INIT_TABLE: "1"
-      SPECIAL_BOOTSTRAP_ADMIN_PASSWORD: ${SPECIAL_BOOTSTRAP_ADMIN_PASSWORD:-}
     volumes:
       - app-data:/var/lib/special
 

@@ -7,6 +7,7 @@ declare(strict_types=1);
 /** @var string|null $error */
 ?>
 <h1>User administration</h1>
+<script src="/spec-copy.js" defer></script>
 <?php if ($error !== null): ?><p class="error" role="alert"><?= special_escape($error) ?></p><?php endif; ?>
 <section class="card">
     <h2>Create user</h2>
@@ -44,7 +45,13 @@ declare(strict_types=1);
             </td>
             <td><?= $user['enabled'] ? 'Yes' : 'No' ?></td>
             <td>
-                <form method="post" action="/admin/users/<?= (int) $user['id'] ?>/enabled">
+                <?php if ((int) $user['id'] !== $principal->id): ?>
+                    <form class="inline" method="post" action="/admin/users/<?= (int) $user['id'] ?>/reset-password" data-confirm="Reset the password for <?= special_escape((string) $user['username']) ?>? They will be signed out everywhere.">
+                        <input type="hidden" name="csrf" value="<?= special_escape(special_csrf_token()) ?>">
+                        <button class="secondary" type="submit">Reset password</button>
+                    </form>
+                <?php endif; ?>
+                <form class="inline" method="post" action="/admin/users/<?= (int) $user['id'] ?>/enabled">
                     <input type="hidden" name="csrf" value="<?= special_escape(special_csrf_token()) ?>">
                     <input type="hidden" name="enabled" value="<?= $user['enabled'] ? '0' : '1' ?>">
                     <button class="<?= $user['enabled'] ? 'danger' : 'secondary' ?>" type="submit"><?= $user['enabled'] ? 'Disable' : 'Enable' ?></button>

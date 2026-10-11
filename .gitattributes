@@ -6,7 +6,6 @@
 *.sql text eol=lf
 *.yaml text eol=lf
 *.yaml text eol=lf
-Caddyfile text eol=lf
 Dockerfile text eol=lf
 *.json text eol=lf
 *.js text eol=lf

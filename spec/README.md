@@ -129,7 +129,7 @@ Passwords are stored only as PHP password hashes. An enabled user is reloaded fr
 - `GET/POST /login`; the session ID is regenerated and only the user ID is stored; the cookie is HTTP-only, Secure in production and SameSite-Strict.
 - "Keep me signed in" (default on) issues a rotating selector/secret remember token (SHA-256 of the secret is stored, the raw value only in an HTTP-only cookie). Rotation is a conditional write, so a stolen cookie replayed after the legitimate browser used it fails.
 - Remember tokens are revoked on logout, when the user is disabled and when the password changes.
-- Login throttling keys on `sha256(username, client IP)` and uses versioned conditional writes, so parallel guesses cannot all read a stale counter. Behind the bundled Caddy proxy (`SPECIAL_TRUST_PROXY=1`) the client IP is the right-most `X-Forwarded-For` entry.
+- Login throttling keys on `sha256(username, client IP)` and uses versioned conditional writes, so parallel guesses cannot all read a stale counter. Behind the ALB (`SPECIAL_TRUST_PROXY=1`) the client IP is the right-most `X-Forwarded-For` entry (`SPECIAL_TRUSTED_PROXY_HOPS` for longer proxy chains).
 - Every state-changing browser form carries a CSRF token; all rendered content is escaped.
 
 ### MCP authentication
@@ -138,11 +138,12 @@ Unchanged from the original: OAuth 2.1 authorization code flow with mandatory S2
 
 ### Admin operations
 
-List users, create user, change role, enable/disable, change own password. All need `users.manage` except the last. The final enabled administrator cannot be disabled or demoted: the store keeps an `enabled_admins` counter that is adjusted inside the same transaction as the user change and refuses to drop below one. The first administrator is created by a non-public CLI command, which can succeed only once for the lifetime of the table.
+List users, create user, change role, enable/disable, change own password. All need `users.manage` except the last. The final enabled administrator cannot be disabled or demoted: the store keeps an `enabled_admins` counter that is adjusted inside the same transaction as the user change and refuses to drop below one. The first administrator is created on the web `/setup` page (guarded by a one-time setup token, ADR-021) or by a non-public CLI command; either succeeds only once for the lifetime of the table. An administrator can reset another user's password: a random temporary password is shown once, the user is signed out and their MCP tokens revoked, and they can reach only the account page until they choose a new password (ADR-022).
 
 ## 6. Web surface
 
 ```text
+GET  /setup            POST /setup            # first-run only, needs the setup token; 404 afterwards
 GET  /login            POST /login            POST /logout
 GET  /specs            # list/search/filter, public + own private
 GET  /specs/new        POST /specs
@@ -150,7 +151,7 @@ GET  /specs/{id}       GET  /specs/{id}/edit  POST /specs/{id}   POST /specs/{id
 GET  /projects         # distinct projects visible to the viewer
 GET  /share/{token}    # unauthenticated read-only capability view
 GET  /account          POST /account/password
-GET  /admin/users      POST /admin/users      POST /admin/users/{id}/role|enabled
+GET  /admin/users      POST /admin/users      POST /admin/users/{id}/role|enabled|reset-password
 GET  /health           # 200 when the table is reachable, 503 otherwise
 POST /mcp              # MCP JSON-RPC endpoint
 ```
@@ -201,7 +202,7 @@ views/             server-rendered templates
 scripts/           bootstrap-admin, register-oauth-client, init-table, deployment-check
 tests/             contract tests (Python harness) and the PHP behaviour suite
 docker/            Apache vhost, php.ini, entrypoint
-deploy/aws/        CloudFormation stack, production compose file, Caddyfile, deploy and push scripts
+deploy/aws/        CloudFormation stack, production compose file, deploy and push scripts
 docs/              AWS setup guide, DynamoDB design, Entra plan, ADRs, MCP and OAuth contracts
 Dockerfile  docker-compose.yml  composer.json
 ```

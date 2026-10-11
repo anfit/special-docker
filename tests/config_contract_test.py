@@ -50,6 +50,23 @@ class ConfigContractTest(unittest.TestCase):
                 result = run_php("tests/config_contract_probe.php", env={**PRODUCTION, **override})
                 self.assertNotEqual(0, result.returncode)
 
+    def test_pre_tls_mode_allows_plain_http_in_production_only_when_asked(self) -> None:
+        pre_tls = {
+            **PRODUCTION,
+            "SPECIAL_PUBLIC_BASE_URL": "http://localhost:8080",
+            "SPECIAL_SESSION_SECURE": "",
+            "SPECIAL_INSECURE_HTTP": "1",
+            "SPECIAL_TRUSTED_PROXY_HOPS": "2",
+            "SPECIAL_VERSION": "1.1.0",
+        }
+        config = php_json_probe("tests/config_contract_probe.php", env=pre_tls)
+        self.assertTrue(config["insecure_http"])
+        self.assertFalse(config["session_secure"], "secure cookies cannot work over plain HTTP")
+        self.assertEqual(2, config["trusted_proxy_hops"])
+        self.assertEqual("1.1.0", config["version"])
+        refused = run_php("tests/config_contract_probe.php", env={**pre_tls, "SPECIAL_INSECURE_HTTP": "0", "SPECIAL_SESSION_SECURE": "0"})
+        self.assertNotEqual(0, refused.returncode, "plain HTTP without the explicit flag must be refused")
+
     def test_development_defaults_target_a_local_table(self) -> None:
         config = php_json_probe(
             "tests/config_contract_probe.php",

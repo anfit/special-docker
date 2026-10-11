@@ -11,7 +11,7 @@ HOME_DIR=/opt/special
 STACK_DIR="$HOME_DIR/stack"
 
 # shellcheck disable=SC1091
-source "$HOME_DIR/instance.env"   # SPECIAL_DOMAIN, SPECIAL_AWS_REGION, SPECIAL_DYNAMODB_TABLE, SPECIAL_IMAGE_REPO, SPECIAL_LOG_GROUP, SPECIAL_SSM_PREFIX
+source "$HOME_DIR/instance.env"   # SPECIAL_PUBLIC_BASE_URL, SPECIAL_AWS_REGION, SPECIAL_DYNAMODB_TABLE, SPECIAL_IMAGE_REPO, SPECIAL_LOG_GROUP, SPECIAL_SSM_PREFIX (+ optional SPECIAL_INSECURE_HTTP, SPECIAL_TRUSTED_PROXY_HOPS, SPECIAL_SETUP_TOKEN)
 
 case "$TAG" in
     sha256:*) IMAGE="$SPECIAL_IMAGE_REPO@$TAG" ;;   # immutable digest
@@ -37,7 +37,6 @@ mkdir -p "$STACK_DIR"
 container="$(docker create "$IMAGE")"
 trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 docker cp "$container:/opt/special-deploy/compose.prod.yml" "$STACK_DIR/compose.prod.yml"
-docker cp "$container:/opt/special-deploy/Caddyfile" "$STACK_DIR/Caddyfile"
 docker cp "$container:/opt/special-deploy/deploy.sh" "$HOME_DIR/deploy.sh"
 
 echo ">> Reading secrets from SSM Parameter Store ($SPECIAL_SSM_PREFIX)"
@@ -48,15 +47,19 @@ cat > "$STACK_DIR/.env" <<ENV
 SPECIAL_ENV=production
 SPECIAL_STORE=dynamodb
 SPECIAL_APP_KEY=$APP_KEY
-SPECIAL_PUBLIC_BASE_URL=https://$SPECIAL_DOMAIN
-SPECIAL_DOMAIN=$SPECIAL_DOMAIN
+SPECIAL_PUBLIC_BASE_URL=$SPECIAL_PUBLIC_BASE_URL
 SPECIAL_AWS_REGION=$SPECIAL_AWS_REGION
 SPECIAL_DYNAMODB_TABLE=$SPECIAL_DYNAMODB_TABLE
 SPECIAL_LOG_GROUP=$SPECIAL_LOG_GROUP
 SPECIAL_IMAGE=$IMAGE
-SPECIAL_SESSION_SECURE=1
 SPECIAL_TRUST_PROXY=1
+SPECIAL_TRUSTED_PROXY_HOPS=${SPECIAL_TRUSTED_PROXY_HOPS:-1}
+SPECIAL_INSECURE_HTTP=${SPECIAL_INSECURE_HTTP:-0}
+SPECIAL_HTTP_PORT=${SPECIAL_HTTP_PORT:-80}
 ENV
+if [ -n "${SPECIAL_SETUP_TOKEN:-}" ]; then
+    echo "SPECIAL_SETUP_TOKEN=$SPECIAL_SETUP_TOKEN" >> "$STACK_DIR/.env"
+fi
 
 echo ">> Starting the stack"
 cd "$STACK_DIR"

@@ -20,16 +20,17 @@ USER_PASSWORD = "a-user-passphrase-1234"
 
 
 class Browser:
-    def __init__(self) -> None:
+    def __init__(self, base: str = BASE) -> None:
+        self.base = base
         self.jar = http.cookiejar.CookieJar()
         self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(self.jar))
 
     def get(self, path: str) -> tuple[int, str]:
-        return self._open(urllib.request.Request(BASE + path))
+        return self._open(urllib.request.Request(self.base + path))
 
     def post(self, path: str, fields: dict[str, str]) -> tuple[int, str]:
         data = urllib.parse.urlencode(fields).encode()
-        return self._open(urllib.request.Request(BASE + path, data=data, method="POST"))
+        return self._open(urllib.request.Request(self.base + path, data=data, method="POST"))
 
     def csrf(self, path: str) -> str:
         _, html = self.get(path)

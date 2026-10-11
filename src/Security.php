@@ -18,6 +18,7 @@ final class Security
     ];
 
     private const UPDATE_RETRIES = 4;
+    private const SETUP_TOKEN_TTL_SECONDS = 86400;
 
     public function __construct(
         private Store $store,
@@ -87,7 +88,8 @@ final class Security
         }
 
         $user = $this->store->getUser((int) $row['user_id']);
-        if ($user === null || !(bool) $user['enabled']) {
+        // A user who must choose a new password cannot use MCP until they have done so on the web.
+        if ($user === null || !(bool) $user['enabled'] || (bool) ($user['must_change_password'] ?? false)) {
             return null;
         }
 
@@ -232,19 +234,104 @@ final class Security
                 if (!(bool) $user['enabled']) {
                     throw new SpecialException('UNAUTHENTICATED', 'The user is not active.', 401);
                 }
-                return [['password_hash' => $hash], 0];
+                return [['password_hash' => $hash, 'must_change_password' => false], 0];
             },
             static fn (array $user): array => special_audit_entry($actor, 'user.password_changed', 'user', $userId, [], $requestId),
         );
         $this->revokeTokensForUser($userId);
     }
 
-    public function bootstrapFirstAdmin(string $username, string $password, ?string $requestId = null): int
+    /**
+     * Administrator-initiated reset: sets a random temporary password, forces a change at next login and
+     * revokes the user's browser and MCP credentials. The temporary password is returned exactly once.
+     *
+     * @return array{user: array<string, mixed>, temporary_password: string}
+     */
+    public function resetPassword(Principal $actor, int $userId, ?string $requestId = null): array
+    {
+        $this->assertPermission($actor, 'users.manage');
+        $userId = $this->validateUserId($userId);
+        if ($actor->id === $userId) {
+            throw new SpecialException('INVALID_ARGUMENT', 'Use the account page to change your own password.', 422);
+        }
+
+        $temporary = substr(special_b64url_encode(random_bytes(18)), 0, 20);
+        $hash = password_hash($temporary, PASSWORD_DEFAULT);
+        $updated = $this->updateWithRetry(
+            $userId,
+            static fn (array $user): array => [['password_hash' => $hash, 'must_change_password' => true], 0],
+            static fn (array $user): array => special_audit_entry($actor, 'user.password_reset', 'user', $userId, [], $requestId),
+        );
+        $this->revokeTokensForUser($userId);
+
+        return ['user' => $this->publicUser($updated), 'temporary_password' => $temporary];
+    }
+
+    public function needsSetup(): bool
+    {
+        return $this->store->needsSetup();
+    }
+
+    /**
+     * Make sure a first-run setup token exists. Unless SPECIAL_SETUP_TOKEN supplies one, a random token is
+     * generated, only its hash is stored, and the plaintext is written once to the error log (CloudWatch in AWS).
+     */
+    public function ensureSetupToken(): void
+    {
+        if (($this->config['setup_token'] ?? '') !== '' || !$this->store->needsSetup()) {
+            return;
+        }
+        $token = special_b64url_encode(random_bytes(24));
+        $expires = special_now(self::SETUP_TOKEN_TTL_SECONDS);
+        if ($this->store->createSetupToken(hash('sha256', $token), $expires, special_now())) {
+            error_log('Special first-run setup token (valid until ' . $expires . '): ' . $token);
+        }
+    }
+
+    /** Create the first administrator from the web setup form. */
+    public function completeSetup(string $username, string $password, string $token, string $ipAddress, ?string $requestId = null): Principal
+    {
+        if (!$this->store->needsSetup()) {
+            throw new SpecialException('NOT_FOUND', 'Not found.', 404);
+        }
+        $attemptKey = hash('sha256', "setup\0" . trim($ipAddress));
+        if ($this->isLoginBlocked($attemptKey) || !$this->setupTokenMatches($token)) {
+            if (!$this->isLoginBlocked($attemptKey)) {
+                $this->recordLoginFailure($attemptKey);
+            }
+            throw new SpecialException('UNAUTHENTICATED', 'The setup token is not valid.', 401);
+        }
+
+        $userId = $this->bootstrapFirstAdmin($username, $password, $requestId, 'web-setup');
+        $this->store->deleteSetupToken();
+        $this->store->deleteLoginAttempt($attemptKey);
+
+        return new Principal($userId, special_normalize_username($username), 'admin');
+    }
+
+    private function setupTokenMatches(string $token): bool
+    {
+        $token = trim($token);
+        if ($token === '' || strlen($token) > 200) {
+            return false;
+        }
+        $configured = (string) ($this->config['setup_token'] ?? '');
+        if ($configured !== '') {
+            return hash_equals(hash('sha256', $configured), hash('sha256', $token));
+        }
+        $row = $this->store->getSetupToken();
+
+        return $row !== null
+            && special_timestamp_is_future((string) $row['expires_at'])
+            && hash_equals((string) $row['token_hash'], hash('sha256', $token));
+    }
+
+    public function bootstrapFirstAdmin(string $username, string $password, ?string $requestId = null, string $via = 'cli'): int
     {
         $username = $this->validateUsername($username);
         $this->validatePassword($password);
 
-        return $this->insertFirstAdmin($username, password_hash($password, PASSWORD_DEFAULT), $requestId);
+        return $this->insertFirstAdmin($username, password_hash($password, PASSWORD_DEFAULT), $requestId, $via);
     }
 
     public function bootstrapFirstAdminWithHash(string $username, string $passwordHash, ?string $requestId = null): int
@@ -255,7 +342,7 @@ final class Security
         return $this->insertFirstAdmin($username, $passwordHash, $requestId);
     }
 
-    private function insertFirstAdmin(string $username, string $passwordHash, ?string $requestId): int
+    private function insertFirstAdmin(string $username, string $passwordHash, ?string $requestId, string $via = 'cli'): int
     {
         $user = $this->store->createUser(
             [
@@ -265,7 +352,7 @@ final class Security
                 'enabled' => true,
                 'created_at' => special_now(),
             ],
-            special_audit_entry(null, 'user.bootstrap_admin_created', 'user', null, [], $requestId),
+            special_audit_entry(null, 'user.bootstrap_admin_created', 'user', null, ['via' => $via], $requestId),
             true,
         );
 
@@ -374,6 +461,7 @@ final class Security
             $scopes,
             $source,
             $clientId,
+            (bool) ($row['must_change_password'] ?? false),
         );
     }
 
@@ -385,6 +473,7 @@ final class Security
             'username' => (string) $row['username'],
             'role' => (string) $row['role'],
             'enabled' => (bool) $row['enabled'],
+            'must_change_password' => (bool) ($row['must_change_password'] ?? false),
             'created_at' => (string) $row['created_at'],
             'updated_at' => (string) $row['updated_at'],
             'last_login_at' => ($row['last_login_at'] ?? null) === null ? null : (string) $row['last_login_at'],

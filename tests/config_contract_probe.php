@@ -15,4 +15,7 @@ echo json_encode([
     'session_secure' => $config['session_secure'],
     'trust_proxy' => $config['trust_proxy'],
     'remember_days' => $config['remember_days'],
+    'insecure_http' => $config['insecure_http'],
+    'trusted_proxy_hops' => $config['trusted_proxy_hops'],
+    'version' => $config['version'],
 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
