@@ -16,8 +16,15 @@ source "$HOME_DIR/instance.env"   # SPECIAL_DOMAIN, SPECIAL_AWS_REGION, SPECIAL_
 IMAGE="$SPECIAL_IMAGE_REPO:$TAG"
 REGISTRY="${SPECIAL_IMAGE_REPO%%/*}"
 
-echo ">> Logging in to $REGISTRY"
-aws ecr get-login-password --region "$SPECIAL_AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
+# Registry authentication is a host concern. A host may provide /opt/special/registry-login.sh
+# (GHCR token, Docker Hub, ...); without it the image is assumed to live in this account's ECR.
+if [ -x "$HOME_DIR/registry-login.sh" ]; then
+    echo ">> Logging in to $REGISTRY (host script)"
+    "$HOME_DIR/registry-login.sh"
+else
+    echo ">> Logging in to $REGISTRY (ECR)"
+    aws ecr get-login-password --region "$SPECIAL_AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
+fi
 
 echo ">> Pulling $IMAGE"
 docker pull "$IMAGE" >/dev/null
