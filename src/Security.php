@@ -37,6 +37,7 @@ final class Security
         $attemptKey = hash('sha256', $normalizedUsername . "\0" . trim($ipAddress));
 
         if ($this->isLoginBlocked($attemptKey)) {
+            Metrics::inc('special_login_attempts_total', ['result' => 'blocked']);
             throw new SpecialException('UNAUTHENTICATED', 'Invalid username or password.', 401);
         }
 
@@ -46,10 +47,12 @@ final class Security
         $passwordMatches = password_verify($password, $hash);
 
         if ($user === null || !(bool) $user['enabled'] || !$passwordMatches) {
+            Metrics::inc('special_login_attempts_total', ['result' => 'failure']);
             $this->recordLoginFailure($attemptKey);
             throw new SpecialException('UNAUTHENTICATED', 'Invalid username or password.', 401);
         }
 
+        Metrics::inc('special_login_attempts_total', ['result' => 'success']);
         $this->store->deleteLoginAttempt($attemptKey);
         $principal = $this->principalFromRow($user, null, 'web');
         $this->store->recordLogin(

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/Domain.php';
+require_once __DIR__ . '/Metrics.php';
 require_once __DIR__ . '/Storage/Store.php';
 require_once __DIR__ . '/Storage/MemoryStore.php';
 require_once __DIR__ . '/Storage/DynamoSchema.php';
@@ -94,6 +95,10 @@ function special_config(): array
     if ($setupToken !== '' && strlen($setupToken) < 20) {
         throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_SETUP_TOKEN must contain at least 20 characters.', 500);
     }
+    $metricsToken = (string) (getenv('SPECIAL_METRICS_TOKEN') ?: '');
+    if ($metricsToken !== '' && strlen($metricsToken) < 20) {
+        throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_METRICS_TOKEN must contain at least 20 characters.', 500);
+    }
     $rememberDays = RememberMe::lifetimeDays();
     $mcpResponseBytes = max(8192, min(2_000_000, (int) (getenv('SPECIAL_MCP_RESPONSE_BYTES') ?: 64_000)));
     $configuredPageSize = max(1, min(100, (int) (getenv('SPECIAL_MCP_MAX_PAGE_SIZE') ?: 50)));
@@ -108,6 +113,8 @@ function special_config(): array
         'mcp_server_version' => (string) (getenv('SPECIAL_MCP_SERVER_VERSION') ?: '1.0.0'),
         'app_key' => $appKey,
         'setup_token' => $setupToken,
+        'metrics_token' => $metricsToken,
+        'metrics_file' => (string) (getenv('SPECIAL_METRICS_FILE') ?: (sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'special-metrics.txt')),
         'version' => (string) (getenv('SPECIAL_VERSION') ?: 'dev'),
         'commit' => (string) (getenv('SPECIAL_COMMIT') ?: 'unknown'),
         'store' => $store,

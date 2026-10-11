@@ -42,6 +42,9 @@ docker cp "$container:/opt/special-deploy/deploy.sh" "$HOME_DIR/deploy.sh"
 echo ">> Reading secrets from SSM Parameter Store ($SPECIAL_SSM_PREFIX)"
 APP_KEY="$(aws ssm get-parameter --region "$SPECIAL_AWS_REGION" --name "$SPECIAL_SSM_PREFIX/app-key" --with-decryption --query Parameter.Value --output text)"
 
+# Optional: a bearer token that enables the Prometheus /metrics endpoint (create <prefix>/metrics-token to opt in).
+METRICS_TOKEN="$(aws ssm get-parameter --region "$SPECIAL_AWS_REGION" --name "$SPECIAL_SSM_PREFIX/metrics-token" --with-decryption --query Parameter.Value --output text 2>/dev/null || true)"
+
 umask 077
 cat > "$STACK_DIR/.env" <<ENV
 SPECIAL_ENV=production
@@ -57,6 +60,9 @@ SPECIAL_TRUSTED_PROXY_HOPS=${SPECIAL_TRUSTED_PROXY_HOPS:-1}
 SPECIAL_INSECURE_HTTP=${SPECIAL_INSECURE_HTTP:-0}
 SPECIAL_HTTP_PORT=${SPECIAL_HTTP_PORT:-80}
 ENV
+if [ -n "$METRICS_TOKEN" ]; then
+    echo "SPECIAL_METRICS_TOKEN=$METRICS_TOKEN" >> "$STACK_DIR/.env"
+fi
 if [ -n "${SPECIAL_SETUP_TOKEN:-}" ]; then
     echo "SPECIAL_SETUP_TOKEN=$SPECIAL_SETUP_TOKEN" >> "$STACK_DIR/.env"
 fi

@@ -20,6 +20,7 @@ Special is a deliberately narrow application for collecting and managing specifi
 | configure or operate it | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | know why things are the way they are | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 | plan the move to Entra | [`docs/ENTRA.md`](docs/ENTRA.md) |
+| scrape metrics with Prometheus / Grafana | [`docs/METRICS.md`](docs/METRICS.md) |
 | put it behind the corporate load balancer / TLS | [`docs/EDGE_INTEGRATION.md`](docs/EDGE_INTEGRATION.md) |
 | connect an MCP client | [`docs/MCP_CONTRACT.md`](docs/MCP_CONTRACT.md), [`docs/OAUTH.md`](docs/OAUTH.md) |
 
