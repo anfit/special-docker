@@ -1,0 +1,44 @@
+# Local development stack: the app plus DynamoDB Local.
+#
+#   docker compose up --build
+#   docker compose exec app php scripts/bootstrap-admin.php --username admin   # needs SPECIAL_BOOTSTRAP_ADMIN_PASSWORD
+#
+# Then browse http://localhost:8080. Data lives in the "dynamodb-data" volume; `docker compose down -v` wipes it.
+# For AWS see docs/AWS_SETUP.md; production uses deploy/aws/compose.prod.yml instead of this file.
+
+services:
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "/data"]
+    user: root
+    volumes:
+      - dynamodb-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  app:
+    build: .
+    depends_on:
+      - dynamodb
+    ports:
+      - "127.0.0.1:8080:80"
+    environment:
+      SPECIAL_ENV: development
+      SPECIAL_APP_KEY: ${SPECIAL_APP_KEY:-local-development-key-that-is-long-enough-123456}
+      SPECIAL_PUBLIC_BASE_URL: http://localhost:8080
+      SPECIAL_SESSION_SECURE: "0"
+      SPECIAL_TRUST_PROXY: "0"
+      SPECIAL_STORE: dynamodb
+      SPECIAL_DYNAMODB_TABLE: special
+      SPECIAL_DYNAMODB_ENDPOINT: http://dynamodb:8000
+      SPECIAL_AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+      SPECIAL_AUTO_INIT_TABLE: "1"
+      SPECIAL_BOOTSTRAP_ADMIN_PASSWORD: ${SPECIAL_BOOTSTRAP_ADMIN_PASSWORD:-}
+    volumes:
+      - app-data:/var/lib/special
+
+volumes:
+  dynamodb-data:
+  app-data:

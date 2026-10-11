@@ -1,0 +1,44 @@
+# Production stack for a single EC2 instance: Special behind Caddy (automatic HTTPS).
+# Started by /opt/special/deploy.sh, which writes ./.env next to this file. Do not edit on the host.
+
+services:
+  app:
+    image: ${SPECIAL_IMAGE}
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - special-data:/var/lib/special
+    expose:
+      - "80"
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${SPECIAL_AWS_REGION}
+        awslogs-group: ${SPECIAL_LOG_GROUP}
+        awslogs-stream: app
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SPECIAL_DOMAIN: ${SPECIAL_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${SPECIAL_AWS_REGION}
+        awslogs-group: ${SPECIAL_LOG_GROUP}
+        awslogs-stream: caddy
+
+volumes:
+  special-data:
+  caddy-data:
+  caddy-config:
