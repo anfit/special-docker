@@ -1,0 +1,15 @@
+.git
+.gitignore
+.gitattributes
+.env
+.env.*
+!.env.example
+vendor
+tests
+docs
+spec
+**/__pycache__
+.smoke-sessions
+*.log
+.tools
+deploy/aws/*.ps1

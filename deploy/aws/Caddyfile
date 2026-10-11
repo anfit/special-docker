@@ -1,0 +1,14 @@
+# Caddy obtains and renews the certificate for {$SPECIAL_DOMAIN} on its own (Let's Encrypt, HTTP-01 on port 80).
+{$SPECIAL_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	reverse_proxy app:80 {
+		# Overwrite anything the client sent so the app can trust the right-most entry.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

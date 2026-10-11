@@ -1,0 +1,21 @@
+{
+    "name": "special/special-docker",
+    "description": "Special: a narrow application for collecting and managing specification documents over a browser UI and MCP. Containerised, DynamoDB-backed.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-openssl": "*",
+        "aws/aws-sdk-php": "^3.320"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true,
+        "platform": {
+            "php": "8.3.0"
+        }
+    }
+}

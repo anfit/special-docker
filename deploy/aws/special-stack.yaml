@@ -1,0 +1,351 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Special on AWS: one EC2 instance running the Docker stack (Caddy + app), a DynamoDB table for all
+  persistence, an ECR repository for the image, and the least-privilege IAM role tying them together.
+  Self-contained: creates its own small VPC. See docs/AWS_SETUP.md.
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Public host name that will point at the instance, e.g. special.example.com. Caddy requests a certificate for it.
+    AllowedPattern: '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium, t3a.small, t3a.medium]
+    Description: x86_64 types only, because the image is built for linux/amd64. t3.small (2 GiB) is comfortable.
+  TableName:
+    Type: String
+    Default: special
+    Description: DynamoDB table name.
+  SsmPrefix:
+    Type: String
+    Default: /special/prod
+    AllowedPattern: '^/[A-Za-z0-9_./-]+$'
+    Description: SSM Parameter Store prefix. The instance reads <prefix>/app-key (SecureString) at deploy time.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 180, 365]
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Amazon Linux 2023, resolved by AWS at deploy time.
+
+Resources:
+  # ------------------------------------------------------------------ network
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - { Key: Name, Value: special }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Name, Value: special }
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.42.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - { Key: Name, Value: special-public }
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: special-public }
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # No SSH. Administration goes through SSM Session Manager (see the AWS setup guide).
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Special web traffic (80 for ACME and redirect, 443 for HTTPS)
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP and ACME challenge }
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS }
+      Tags:
+        - { Key: Name, Value: special }
+
+  # ------------------------------------------------------------------ persistence
+  SpecialTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: gsi1pk, AttributeType: S }
+        - { AttributeName: gsi1sk, AttributeType: S }
+        - { AttributeName: gsi2pk, AttributeType: S }
+        - { AttributeName: gsi2sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      # Keep the projected attribute list identical to src/Storage/DynamoSchema.php.
+      GlobalSecondaryIndexes:
+        - IndexName: gsi1
+          KeySchema:
+            - { AttributeName: gsi1pk, KeyType: HASH }
+            - { AttributeName: gsi1sk, KeyType: RANGE }
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - etype
+              - id
+              - title
+              - description
+              - project_name
+              - status
+              - visibility
+              - revision
+              - created_by
+              - updated_by
+              - created_at
+              - updated_at
+              - deleted_at
+              - username
+              - role
+              - enabled
+              - version
+              - last_login_at
+              - user_id
+              - revoked_at
+              - consumed_at
+        - IndexName: gsi2
+          KeySchema:
+            - { AttributeName: gsi2pk, KeyType: HASH }
+            - { AttributeName: gsi2sk, KeyType: RANGE }
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - etype
+              - id
+              - title
+              - description
+              - project_name
+              - status
+              - visibility
+              - revision
+              - created_by
+              - updated_by
+              - created_at
+              - updated_at
+              - deleted_at
+              - username
+              - role
+              - enabled
+              - version
+              - last_login_at
+              - user_id
+              - revoked_at
+              - consumed_at
+
+  # ------------------------------------------------------------------ delivery & logs
+  ImageRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: special
+      EmptyOnDelete: true
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"Keep the 20 most recent images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /special/app
+      RetentionInDays: !Ref LogRetentionDays
+
+  # ------------------------------------------------------------------ identity of the instance
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Policies:
+        - PolicyName: special-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TableAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:ConditionCheckItem
+                  - dynamodb:DescribeTable
+                  - dynamodb:DescribeTimeToLive
+                # The trailing * also covers tables restored from a backup under a derived name
+                # (for example special-restore); see the "Restore" section of the AWS guide.
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}*"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}*/index/*"
+              - Sid: ReadAppSecrets
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SsmPrefix}/*"
+              - Sid: ShipLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt LogGroup.Arn
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ------------------------------------------------------------------ compute
+  Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: PublicDefaultRoute
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds: [!Ref InstanceSecurityGroup]
+      # IMDSv2 only. Hop limit 2 lets containers (one extra hop) reach the instance role credentials.
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 20
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: special }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+
+          dnf install -y docker
+          mkdir -p /etc/docker
+          cat > /etc/docker/daemon.json <<'JSON'
+          {"log-driver": "local", "log-opts": {"max-size": "10m", "max-file": "3"}}
+          JSON
+          systemctl enable --now docker
+
+          # Compose v2 as a Docker CLI plugin.
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -fsSL "https://github.com/docker/compose/releases/download/v2.29.1/docker-compose-linux-$(uname -m)" \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+          mkdir -p /opt/special
+          cat > /opt/special/instance.env <<'ENV'
+          SPECIAL_DOMAIN=${DomainName}
+          SPECIAL_AWS_REGION=${AWS::Region}
+          SPECIAL_DYNAMODB_TABLE=${SpecialTable}
+          SPECIAL_IMAGE_REPO=${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/${ImageRepository}
+          SPECIAL_LOG_GROUP=${LogGroup}
+          SPECIAL_SSM_PREFIX=${SsmPrefix}
+          ENV
+
+          # The deploy logic ships inside the image; this wrapper only fetches and runs it.
+          cat > /usr/local/bin/special-deploy <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          source /opt/special/instance.env
+          if [ $# -ge 1 ]; then TAG=$1; else TAG=latest; fi
+          IMAGE=$SPECIAL_IMAGE_REPO:$TAG
+          REGISTRY=$(echo "$SPECIAL_IMAGE_REPO" | cut -d/ -f1)
+          aws ecr get-login-password --region "$SPECIAL_AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY" > /dev/null
+          docker pull "$IMAGE" > /dev/null
+          docker run --rm --entrypoint cat "$IMAGE" /opt/special-deploy/deploy.sh > /opt/special/deploy.sh
+          chmod +x /opt/special/deploy.sh
+          exec /opt/special/deploy.sh "$TAG"
+          SH
+          chmod +x /usr/local/bin/special-deploy
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: special }
+
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref Instance
+      AllocationId: !GetAtt ElasticIp.AllocationId
+
+Outputs:
+  PublicIp:
+    Description: Create a DNS A record for the domain pointing here.
+    Value: !Ref ElasticIp
+  Url:
+    Value: !Sub "https://${DomainName}"
+  ImageRepositoryUri:
+    Description: Push the application image here.
+    Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/${ImageRepository}"
+  InstanceId:
+    Value: !Ref Instance
+  TableName:
+    Value: !Ref SpecialTable
+  LogGroupName:
+    Value: !Ref LogGroup
+  ConnectCommand:
+    Description: Open a shell on the instance (no SSH needed).
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance}"
