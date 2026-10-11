@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+vendor/
+.tools/
+coverage/
+.phpunit.result.cache
+*.log
+*.local
+tmp/
+var/
+secrets/
+.smoke-sessions/
+.idea/
+.vscode/
