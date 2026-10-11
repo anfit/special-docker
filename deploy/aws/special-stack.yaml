@@ -1,14 +1,39 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Special on AWS: one EC2 instance running the Docker stack (Caddy + app), a DynamoDB table for all
+  Special on AWS: one EC2 instance running the Docker stack (the app over plain HTTP; TLS is terminated by whatever you put in front), a DynamoDB table for all
   persistence, an ECR repository for the image, and the least-privilege IAM role tying them together.
   Self-contained: creates its own small VPC. See docs/AWS_SETUP.md.
 
+Conditions:
+  HasEdgeSecurityGroup: !Not [!Equals [!Ref AlbSecurityGroupId, ""]]
+
 Parameters:
-  DomainName:
+  AlbSecurityGroupId:
     Type: String
-    Description: Public host name that will point at the instance, e.g. special.example.com. Caddy requests a certificate for it.
-    AllowedPattern: '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+    Default: ""
+    Description: Security group of the load balancer / proxy run by your edge team. When set, it may reach port 80 on the instance. Leave empty to keep the instance closed (SSM tunnel only).
+    AllowedPattern: '^(sg-[0-9a-f]+)?$'
+  PublicBaseUrl:
+    Type: String
+    Default: http://localhost:8080
+    Description: The URL users and MCP clients will use, e.g. https://special.corp.example. Until TLS is attached use http://localhost:8080 (SSM port-forward). Tokens and share links are bound to it.
+    AllowedPattern: '^https?://[A-Za-z0-9.-]+(:[0-9]+)?$'
+  InsecureHttp:
+    Type: String
+    Default: "1"
+    AllowedValues: ["0", "1"]
+    Description: "1 = allow plain HTTP and non-secure cookies (pre-TLS only). Set 0 once the TLS-terminating proxy is attached and PublicBaseUrl is https."
+  TrustedProxyHops:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 5
+    Description: How many proxies in front of the app append to X-Forwarded-For (1 for a single load balancer).
+  IngressCidr:
+    Type: String
+    Default: 127.0.0.1/32
+    Description: Who may reach port 80 on the instance (your proxy / load balancer subnet). The default opens nothing. For a load balancer in another security group, add an ingress rule to the SecurityGroupId output instead.
+    AllowedPattern: '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$'
   InstanceType:
     Type: String
     Default: t3.small
@@ -90,13 +115,23 @@ Resources:
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Special web traffic (80 for ACME and redirect, 443 for HTTPS)
+      GroupDescription: Special HTTP from the TLS-terminating proxy only
       VpcId: !Ref Vpc
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP and ACME challenge }
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: !Ref IngressCidr, Description: HTTP from the proxy }
       Tags:
         - { Key: Name, Value: special }
+
+  EdgeIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasEdgeSecurityGroup
+    Properties:
+      GroupId: !Ref InstanceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref AlbSecurityGroupId
+      Description: HTTP from the edge team's load balancer
 
   # ------------------------------------------------------------------ persistence
   SpecialTable:
@@ -293,7 +328,9 @@ Resources:
 
           mkdir -p /opt/special
           cat > /opt/special/instance.env <<'ENV'
-          SPECIAL_DOMAIN=${DomainName}
+          SPECIAL_PUBLIC_BASE_URL=${PublicBaseUrl}
+          SPECIAL_INSECURE_HTTP=${InsecureHttp}
+          SPECIAL_TRUSTED_PROXY_HOPS=${TrustedProxyHops}
           SPECIAL_AWS_REGION=${AWS::Region}
           SPECIAL_DYNAMODB_TABLE=${SpecialTable}
           SPECIAL_IMAGE_REPO=${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/${ImageRepository}
@@ -317,26 +354,16 @@ Resources:
           SH
           chmod +x /usr/local/bin/special-deploy
 
-  ElasticIp:
-    Type: AWS::EC2::EIP
-    DependsOn: GatewayAttachment
-    Properties:
-      Domain: vpc
-      Tags:
-        - { Key: Name, Value: special }
-
-  ElasticIpAssociation:
-    Type: AWS::EC2::EIPAssociation
-    Properties:
-      InstanceId: !Ref Instance
-      AllocationId: !GetAtt ElasticIp.AllocationId
-
 Outputs:
-  PublicIp:
-    Description: Create a DNS A record for the domain pointing here.
-    Value: !Ref ElasticIp
-  Url:
-    Value: !Sub "https://${DomainName}"
+  PortForwardCommand:
+    Description: Reach the app on http://localhost:8080 without opening any network port (pre-TLS, or for administration).
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartPortForwardingSession --parameters portNumber=80,localPortNumber=8080"
+  PrivateIp:
+    Description: Register this address (port 80, health check /health) as the target of your load balancer or proxy.
+    Value: !GetAtt Instance.PrivateIp
+  SecurityGroupId:
+    Description: Allow your load balancer's security group to reach this group on TCP 80.
+    Value: !Ref InstanceSecurityGroup
   ImageRepositoryUri:
     Description: Push the application image here.
     Value: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.${AWS::URLSuffix}/${ImageRepository}"

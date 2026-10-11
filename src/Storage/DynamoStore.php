@@ -346,6 +346,7 @@ final class DynamoStore implements Store
             'password_hash' => (string) ($row['password_hash'] ?? ''),
             'role' => (string) $row['role'],
             'enabled' => (bool) $row['enabled'],
+            'must_change_password' => (bool) ($row['must_change_password'] ?? false),
             'version' => (int) ($row['version'] ?? 1),
             'created_at' => (string) $row['created_at'],
             'updated_at' => (string) $row['updated_at'],
@@ -507,6 +508,59 @@ final class DynamoStore implements Store
             $this->update('USER#' . $id, ['last_login_at' => $at], ['condition' => 'attribute_exists(pk)']),
             $this->putAudit($audit),
         ]);
+    }
+
+    public function needsSetup(): bool
+    {
+        $marker = $this->client->getItem([
+            'TableName' => $this->table,
+            'Key' => $this->key('BOOTSTRAP#admin'),
+            'ConsistentRead' => true,
+            'ProjectionExpression' => 'pk',
+        ]);
+
+        return empty($marker['Item']) && $this->enabledAdminCount() < 1;
+    }
+
+    public function getSetupToken(): ?array
+    {
+        $result = $this->client->getItem([
+            'TableName' => $this->table,
+            'Key' => $this->key('SETUP#token'),
+            'ConsistentRead' => true,
+        ]);
+        if (empty($result['Item'])) {
+            return null;
+        }
+        $row = $this->unmarshal($result['Item']);
+
+        return ['token_hash' => (string) $row['token_hash'], 'expires_at' => (string) $row['expires_at']];
+    }
+
+    public function createSetupToken(string $tokenHash, string $expiresAt, string $now): bool
+    {
+        $put = $this->put(
+            [
+                'pk' => 'SETUP#token',
+                'sk' => self::SK,
+                'etype' => 'setup_token',
+                'token_hash' => $tokenHash,
+                'expires_at' => $expiresAt,
+                'ttl' => $this->epoch($expiresAt) + self::GRACE_SECONDS,
+            ],
+            [
+                'condition' => 'attribute_not_exists(pk) OR #e < :now',
+                'names' => ['#e' => 'expires_at'],
+                'values' => [':now' => $now],
+            ],
+        )['Put'];
+
+        return $this->guardedCall(fn () => $this->client->putItem($put));
+    }
+
+    public function deleteSetupToken(): void
+    {
+        $this->client->deleteItem(['TableName' => $this->table, 'Key' => $this->key('SETUP#token')]);
     }
 
     // ------------------------------------------------------------------ specs

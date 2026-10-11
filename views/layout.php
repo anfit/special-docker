@@ -16,7 +16,8 @@ declare(strict_types=1);
     <style>
         :root { color-scheme: light; font-family: system-ui, sans-serif; line-height: 1.45; }
         body { margin: 0; background: #f6f7f9; color: #18202a; }
-        header, main { max-width: 1040px; margin: 0 auto; padding: 1rem; }
+        header, main, footer { max-width: 1040px; margin: 0 auto; padding: 1rem; }
+        footer { font-size: .85rem; }
         header { display: flex; gap: 1rem; align-items: center; justify-content: space-between; }
         nav { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
         a { color: #1459a6; }
@@ -98,5 +99,9 @@ declare(strict_types=1);
     <?php endforeach; ?>
     <?= $content ?>
 </main>
+<footer>
+    <?php $build = special_config(); ?>
+    <span class="muted">Special <?= special_escape((string) ($build['version'] ?? 'dev')) ?></span>
+</footer>
 </body>
 </html>

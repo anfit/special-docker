@@ -72,9 +72,15 @@ function special_config(): array
     if ($sessionPath === '') {
         throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_SESSION_PATH must not be empty.', 500);
     }
+    // Pre-TLS escape hatch: lets a production deployment run over plain HTTP (for example behind an SSM
+    // port-forward) until the corporate load balancer / proxy that terminates TLS is attached.
+    $insecureHttp = filter_var((string) (getenv('SPECIAL_INSECURE_HTTP') ?: '0'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+    if ($insecureHttp === null) {
+        throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_INSECURE_HTTP must be boolean.', 500);
+    }
     $sessionSecureValue = getenv('SPECIAL_SESSION_SECURE');
     if ($sessionSecureValue === false || $sessionSecureValue === '') {
-        $sessionSecureValue = $environment === 'production' ? '1' : '0';
+        $sessionSecureValue = ($environment === 'production' && !$insecureHttp) ? '1' : '0';
     }
     $sessionSecure = filter_var($sessionSecureValue, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     if ($sessionSecure === null) {
@@ -83,6 +89,10 @@ function special_config(): array
     $trustProxy = filter_var((string) (getenv('SPECIAL_TRUST_PROXY') ?: '0'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
     if ($trustProxy === null) {
         throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_TRUST_PROXY must be boolean.', 500);
+    }
+    $setupToken = (string) (getenv('SPECIAL_SETUP_TOKEN') ?: '');
+    if ($setupToken !== '' && strlen($setupToken) < 20) {
+        throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_SETUP_TOKEN must contain at least 20 characters.', 500);
     }
     $rememberDays = RememberMe::lifetimeDays();
     $mcpResponseBytes = max(8192, min(2_000_000, (int) (getenv('SPECIAL_MCP_RESPONSE_BYTES') ?: 64_000)));
@@ -97,6 +107,9 @@ function special_config(): array
         'mcp_discovery_version' => (string) (getenv('SPECIAL_MCP_DISCOVERY_VERSION') ?: '2026-07-28'),
         'mcp_server_version' => (string) (getenv('SPECIAL_MCP_SERVER_VERSION') ?: '1.0.0'),
         'app_key' => $appKey,
+        'setup_token' => $setupToken,
+        'version' => (string) (getenv('SPECIAL_VERSION') ?: 'dev'),
+        'commit' => (string) (getenv('SPECIAL_COMMIT') ?: 'unknown'),
         'store' => $store,
         'dynamodb_table' => (string) (getenv('SPECIAL_DYNAMODB_TABLE') ?: 'special'),
         'aws_region' => $region,
@@ -106,6 +119,8 @@ function special_config(): array
         'session_path' => $sessionPath,
         'session_secure' => $sessionSecure,
         'trust_proxy' => $trustProxy,
+        'trusted_proxy_hops' => max(1, min(5, (int) (getenv('SPECIAL_TRUSTED_PROXY_HOPS') ?: 1))),
+        'insecure_http' => $insecureHttp,
         'remember_days' => $rememberDays,
         'mcp_request_bytes' => max(16_384, min(4_000_000, (int) (getenv('SPECIAL_MCP_REQUEST_BYTES') ?: 2_000_000))),
         'mcp_response_bytes' => $mcpResponseBytes,
@@ -135,11 +150,11 @@ function special_config(): array
         if ($config['dynamodb_endpoint'] !== '') {
             throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_DYNAMODB_ENDPOINT is for local development only.', 500);
         }
-        if ((bool) $config['session_secure'] !== true) {
+        if (!$insecureHttp && (bool) $config['session_secure'] !== true) {
             throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_SESSION_SECURE must be enabled in production.', 500);
         }
-        if (strtolower((string) $urlParts['scheme']) !== 'https') {
-            throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_PUBLIC_BASE_URL must use HTTPS in production.', 500);
+        if (!$insecureHttp && strtolower((string) $urlParts['scheme']) !== 'https') {
+            throw new SpecialException('CONFIGURATION_ERROR', 'SPECIAL_PUBLIC_BASE_URL must use HTTPS in production (set SPECIAL_INSECURE_HTTP=1 only until TLS is attached).', 500);
         }
     }
 
@@ -216,8 +231,10 @@ function special_request_id(): string
 }
 
 /**
- * Client address for throttling and audit. Behind the bundled reverse proxy (SPECIAL_TRUST_PROXY=1) the
- * right-most X-Forwarded-For entry is the one the proxy itself observed; anything to its left is client-supplied.
+ * Client address for throttling and audit. With SPECIAL_TRUST_PROXY=1 the entry SPECIAL_TRUSTED_PROXY_HOPS places
+ * from the right of `X-Forwarded-For` is used: 1 for a single TLS-terminating proxy/load balancer (which appends
+ * the address it saw), 2 when a second trusted proxy sits in front of it, and so on. Entries further left are
+ * client-supplied and ignored.
  */
 function special_client_ip(array $config): string
 {
@@ -225,7 +242,8 @@ function special_client_ip(array $config): string
         $forwarded = (string) ($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
         if ($forwarded !== '') {
             $parts = array_map('trim', explode(',', $forwarded));
-            $candidate = (string) end($parts);
+            $index = max(0, count($parts) - max(1, (int) ($config['trusted_proxy_hops'] ?? 1)));
+            $candidate = (string) ($parts[$index] ?? '');
             if (filter_var($candidate, FILTER_VALIDATE_IP) !== false) {
                 return $candidate;
             }

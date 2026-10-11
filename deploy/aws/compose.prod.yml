@@ -1,4 +1,6 @@
-# Production stack for a single EC2 instance: Special behind Caddy (automatic HTTPS).
+# Production stack for a single docker host: the Special container, plain HTTP on host port 80.
+# TLS is terminated outside (corporate load balancer, ALB, reverse proxy). Until one is attached, reach the
+# app through an SSM port-forward and set SPECIAL_INSECURE_HTTP=1 (see docs/AWS_SETUP.md, "TLS").
 # Started by /opt/special/deploy.sh, which writes ./.env next to this file. Do not edit on the host.
 
 services:
@@ -8,8 +10,8 @@ services:
     env_file: .env
     volumes:
       - special-data:/var/lib/special
-    expose:
-      - "80"
+    ports:
+      - "${SPECIAL_HTTP_PORT:-80}:80"
     logging:
       driver: awslogs
       options:
@@ -17,28 +19,5 @@ services:
         awslogs-group: ${SPECIAL_LOG_GROUP}
         awslogs-stream: app
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    depends_on:
-      - app
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      SPECIAL_DOMAIN: ${SPECIAL_DOMAIN}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    logging:
-      driver: awslogs
-      options:
-        awslogs-region: ${SPECIAL_AWS_REGION}
-        awslogs-group: ${SPECIAL_LOG_GROUP}
-        awslogs-stream: caddy
-
 volumes:
   special-data:
-  caddy-data:
-  caddy-config:

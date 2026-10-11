@@ -5,6 +5,9 @@ declare(strict_types=1);
 /** @var \Special\Principal $principal */
 ?>
 <h1>Account</h1>
+<?php if ($principal->mustChangePassword): ?>
+    <p class="flash error" role="alert">An administrator reset your password. Choose a new one to continue.</p>
+<?php endif; ?>
 <p>Signed in as <strong><?= special_escape($principal->username) ?></strong>.</p>
 <section class="card">
     <h2>Change password</h2>

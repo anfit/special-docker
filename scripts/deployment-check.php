@@ -23,7 +23,7 @@ $report = static function (string $label, bool $ok, string $detail = '') use (&$
 
 try {
     $config = special_config();
-    $report('configuration', true, 'env=' . $config['environment'] . ' store=' . $config['store']);
+    $report('configuration', true, 'env=' . $config['environment'] . ' store=' . $config['store'] . ' version=' . $config['version']);
     $store = special_store($config);
     $store->ping();
     $report('store reachable', true);

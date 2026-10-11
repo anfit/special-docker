@@ -9,7 +9,7 @@ Special ships as a Docker image. Where you run it decides which compose file app
 
 ## The image
 
-`Dockerfile` has two stages: Composer installs the AWS SDK, then `php:8.3-apache` receives `public/`, `src/`, `views/`, `scripts/` and `vendor/`. Apache serves `public/` with `FallbackResource /index.php`, forwards the `Authorization` header (needed by MCP), and sets security headers including a CSP. The image also carries `deploy/aws/{compose.prod.yml,Caddyfile,deploy.sh}` so an instance only needs to know the image name. Health check: `GET /health` (200 when DynamoDB answers).
+`Dockerfile` has two stages: Composer installs the AWS SDK, then `php:8.3-apache` receives `public/`, `src/`, `views/`, `scripts/` and `vendor/`. Apache serves `public/` with `FallbackResource /index.php`, forwards the `Authorization` header (needed by MCP), and sets security headers including a CSP. The image speaks **plain HTTP on port 80 and never handles certificates**: TLS is terminated by an ALB or corporate proxy in front. The image also carries `deploy/aws/{compose.prod.yml,deploy.sh}` so a host only needs to know the image name. Health check: `GET /health` (200 when DynamoDB answers).
 
 Build for the production architecture explicitly: `docker build --platform linux/amd64 -t special .` (the provided push scripts do this).
 
@@ -28,15 +28,19 @@ All configuration is environment variables with the `SPECIAL_*` prefix. In AWS t
 | `SPECIAL_DYNAMODB_ENDPOINT` | none | DynamoDB Local URL; rejected in production |
 | `SPECIAL_MEMORY_STORE_FILE` | none | Persist the memory store to a file (dev/tests) |
 | `SPECIAL_SESSION_PATH` | `/var/lib/special/sessions` (image) | PHP session files; keep on a volume |
-| `SPECIAL_SESSION_SECURE` | `1` in production | Secure cookies |
-| `SPECIAL_TRUST_PROXY` | `1` (image), `0` in dev compose | Use the right-most `X-Forwarded-For` as the client IP |
+| `SPECIAL_INSECURE_HTTP` | `0` | `1` allows an `http://` base URL and non-secure cookies in production. For the pre-TLS period only (SSM tunnel); `/health` then reports `warnings: ["insecure_http"]` |
+| `SPECIAL_SESSION_SECURE` | `1` in production (`0` with `SPECIAL_INSECURE_HTTP=1`) | Secure cookies |
+| `SPECIAL_TRUST_PROXY` | `1` (image), `0` in dev compose | Use `X-Forwarded-For` as the client IP (behind the ALB / proxy) |
+| `SPECIAL_TRUSTED_PROXY_HOPS` | 1 | Which entry from the right of `X-Forwarded-For` is the client: 1 for a single ALB, more only when further trusted proxies sit in front |
+| `SPECIAL_SETUP_TOKEN` | none | Token required by the first-run `/setup` page (20+ characters). Unset = generated once, hashed in the table, written to the log, valid 24 h |
+| `SPECIAL_VERSION`, `SPECIAL_COMMIT` | `dev`, `unknown` | Build labels set by the image; shown in the footer, `/health` and `deployment-check` |
 | `SPECIAL_REMEMBER_DAYS` | 60 | "Keep me signed in" lifetime (1–3650) |
 | `SPECIAL_MCP_RESPONSE_BYTES`, `SPECIAL_MCP_REQUEST_BYTES`, `SPECIAL_MCP_MAX_PAGE_SIZE` | 64000, 2000000, 50 | MCP bounds |
 | `SPECIAL_OAUTH_ACCESS_TTL`, `_REFRESH_TTL`, `_CODE_TTL` | 900, 2592000, 300 | seconds |
 | `SPECIAL_LOGIN_MAX_ATTEMPTS`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` | 5, 300, 900 | login throttling |
 | `SPECIAL_AUTO_INIT_TABLE` | `0` | Local convenience: create the table on container start |
 
-Production refuses to start the application when the key is short, the region is missing, a local endpoint or the memory store is configured, cookies are not secure, or the URL is not HTTPS (`/health` then answers 500/503).
+Production refuses to start the application when the key is short, the region is missing, a local endpoint or the memory store is configured, or (unless `SPECIAL_INSECURE_HTTP=1`) cookies are not secure or the URL is not HTTPS (`/health` then answers 500/503).
 
 AWS credentials are never configured here: in AWS the SDK uses the instance role; against DynamoDB Local the compose file supplies dummy values.
 
@@ -46,7 +50,7 @@ All commands run inside the app container (`docker compose exec app ...` locally
 
 | Command | Purpose |
 |---|---|
-| `php scripts/bootstrap-admin.php --username <name>` with `SPECIAL_BOOTSTRAP_ADMIN_PASSWORD` (or `..._PASSWORD_HASH`) | Create the first administrator; works once per table |
+| `php scripts/bootstrap-admin.php --username <name>` with `SPECIAL_BOOTSTRAP_ADMIN_PASSWORD` (or `..._PASSWORD_HASH`) | CLI alternative to the web `/setup` page; creates the first administrator, once per table |
 | `php scripts/register-oauth-client.php --client-id ... --name ... --redirect-uri ...` | Register a fixed OAuth client |
 | `php scripts/deployment-check.php` | Verify configuration, table, indexes, TTL and administrator |
 | `php scripts/init-table.php` | Create the table (DynamoDB Local or an empty AWS account); idempotent |
@@ -62,4 +66,4 @@ Browse <http://localhost:8080>. Run the tests with the commands in the README; t
 
 ## Rollback and releases
 
-Each push is tagged `latest` and with the git short SHA. Roll back with `sudo special-deploy <sha>`. There is no schema migration step: new attributes are additive, and key-format changes are explicit one-off scripts (see [`DYNAMODB.md`](DYNAMODB.md#operating-the-table)).
+Releases are git tags `vX.Y.Z`; CI publishes `ghcr.io/<owner>/special-docker:X.Y.Z` (and `:edge` for `main`). Roll back with `sudo special-deploy <previous-version>`. There is no schema migration step: new attributes are additive, and key-format changes are explicit one-off scripts (see [`DYNAMODB.md`](DYNAMODB.md#operating-the-table)).

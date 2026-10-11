@@ -25,13 +25,18 @@ COPY views ./views
 COPY scripts ./scripts
 COPY --from=vendor /app/vendor ./vendor
 
-# The image carries its own deployment descriptor so an EC2 host only has to know the image name.
-COPY deploy/aws/compose.prod.yml deploy/aws/Caddyfile deploy/aws/deploy.sh /opt/special-deploy/
+# The image carries its own deployment descriptor so a host only has to know the image name.
+# TLS is not handled here: the container speaks plain HTTP and a proxy / load balancer terminates TLS.
+COPY deploy/aws/compose.prod.yml deploy/aws/deploy.sh /opt/special-deploy/
 
 COPY docker/entrypoint.sh /usr/local/bin/special-entrypoint
 RUN chmod +x /usr/local/bin/special-entrypoint /opt/special-deploy/deploy.sh
 
-ENV SPECIAL_ENV=production \
+ARG SPECIAL_VERSION=dev
+ARG SPECIAL_COMMIT=unknown
+ENV SPECIAL_VERSION=$SPECIAL_VERSION \
+    SPECIAL_COMMIT=$SPECIAL_COMMIT \
+    SPECIAL_ENV=production \
     SPECIAL_STORE=dynamodb \
     SPECIAL_SESSION_PATH=/var/lib/special/sessions \
     SPECIAL_TRUST_PROXY=1
