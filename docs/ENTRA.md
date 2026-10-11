@@ -2,6 +2,10 @@
 
 Status: **planned, not implemented.** This page records how the current design leaves room for it, so the switch is a contained change.
 
+## Who may sign in (decision)
+
+Special remains an internal system. **Entra decides who may use it**: set *Assignment required* on the enterprise application and assign users, groups or invited B2B guests to it. Anyone Entra lets in is an ordinary Special user; there is no member/guest distinction inside the app, and `public` keeps meaning "visible to every signed-in user". Externals therefore need no special model: invite them as guests in Entra and assign an app role. Access is removed by unassigning them in Entra.
+
 ## What stays the same
 
 Authorization is expressed in terms of a `Principal` (id, username, role, scopes) and the permissions `spec.read`, `spec.write`, `users.manage`. Specs reference users by integer `created_by` / `updated_by`. MCP bearer tokens resolve to a `Principal` through the user record. None of that cares how the user proved who they are.
