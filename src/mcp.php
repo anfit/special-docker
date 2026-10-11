@@ -696,6 +696,8 @@ function special_mcp_cors_headers(): void
 function special_mcp_log(string $requestId, string $method, string $outcome, ?string $code = null): void
 {
     $safeMethod = preg_replace('/[^A-Za-z0-9._:\/-]/', '_', substr($method, 0, 100)) ?: 'unknown';
+    $knownMethods = ['initialize', 'ping', 'notifications/initialized', 'server/discover', 'tools/list', 'tools/call', 'resources/list', 'resources/templates/list', 'resources/read'];
+    Metrics::inc('special_mcp_requests_total', ['method' => in_array($safeMethod, $knownMethods, true) ? $safeMethod : 'other', 'outcome' => $outcome]);
     $message = 'MCP request_id=' . $requestId . ' method=' . $safeMethod . ' outcome=' . $outcome;
     if ($code !== null) {
         $message .= ' code=' . preg_replace('/[^A-Za-z0-9_.:-]/', '_', substr($code, 0, 100));

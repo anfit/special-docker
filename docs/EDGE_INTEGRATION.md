@@ -21,8 +21,9 @@ Special does not provide, own or renew TLS. In a corporate deployment the **Appl
 5. **Do not cache** `/mcp`, `/oauth/*`, `/.well-known/*`, `/share/*` or any authenticated page. Static assets under `/` (for example `/spec-copy.js`) may be cached.
 6. **Idle/response timeout ≥ 60 s** (requests are short; the default 60 s of an ALB is fine).
 7. **Use the agreed host name** for users *and* for MCP clients. It must equal `SPECIAL_PUBLIC_BASE_URL` exactly (scheme + host, no path, no trailing slash). OAuth tokens, MCP resource binding and share links are derived from it, so changing it later signs MCP clients out and breaks handed-out share links.
-8. **WAF / rate limiting** (optional): allow the paths above; avoid rules that block JSON-RPC `POST` bodies on `/mcp` or the OAuth `POST`s.
-9. **MCP clients in the vendor's cloud** (hosted chat assistants) need an internet-facing listener with a publicly trusted certificate. Clients running on corporate machines (desktop/CLI tools) can use an internal listener and a corporate CA.
+8. **Do not route `/metrics`.** It is for the internal Prometheus only, which scrapes the instance directly (see [`METRICS.md`](METRICS.md)).
+9. **WAF / rate limiting** (optional): allow the paths above; avoid rules that block JSON-RPC `POST` bodies on `/mcp` or the OAuth `POST`s.
+10. **MCP clients in the vendor's cloud** (hosted chat assistants) need an internet-facing listener with a publicly trusted certificate. Clients running on corporate machines (desktop/CLI tools) can use an internal listener and a corporate CA.
 
 ## What the Special side does once the edge exists
 
@@ -46,7 +47,7 @@ While the edge does not exist yet, use the closed-by-default host through an SSM
 > * Public host name: `special.<our domain>` (certificate and DNS record on your side).
 > * Target: EC2 instance `<instance id>` (`<private IP>`), **HTTP port 80**, VPC `<vpc id>`. Health check `GET /health`, expect `200`.
 > * Please allow your load balancer's security group (`<sg id>`) as a source for TCP 80 on our security group `<sg id of the instance>` (or tell us the CIDR), **or** give us the ARN of a target group and we will register the instance ourselves.
-> * Forward `X-Forwarded-For`, `Authorization` and request bodies up to 4 MB unmodified; no path rewriting; do not cache `/mcp`, `/oauth/*`, `/.well-known/*`, `/share/*`.
+> * Forward `X-Forwarded-For`, `Authorization` and request bodies up to 4 MB unmodified; no path rewriting; do not cache `/mcp`, `/oauth/*`, `/.well-known/*`, `/share/*`; **do not route `/metrics`**.
 > * Number of trusted proxies in front of our app that append to `X-Forwarded-For`: `<n>` (a single ALB = 1).
 > * Internet-facing listener with a publicly trusted certificate is required if hosted AI assistants must reach `/mcp`; an internal listener is fine for corporate desktop/CLI clients.
 >

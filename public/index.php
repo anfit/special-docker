@@ -26,6 +26,7 @@ use Special\RememberMe;
 use Special\Security;
 use Special\SpecService;
 use Special\SpecialException;
+use function Special\special_mcp_bearer_token;
 use function Special\special_mcp_handle_http;
 use function Special\special_mcp_handle_method_not_allowed;
 use function Special\special_mcp_handle_preflight;
@@ -82,6 +83,20 @@ try {
     $emitUnavailable($path === '/health' ? 503 : 500, $path === '/mcp');
 }
 
+if ($config['metrics_token'] !== '') {
+    \Special\Metrics::configure((string) $config['metrics_file']);
+    $metricsStartedAt = microtime(true);
+    register_shutdown_function(static function () use ($path, $method, $metricsStartedAt): void {
+        $route = \Special\Metrics::routeFor($path);
+        if ($route === null) {
+            return;
+        }
+        $labels = ['method' => in_array($method, ['GET', 'POST', 'OPTIONS'], true) ? $method : 'other', 'route' => $route];
+        \Special\Metrics::inc('special_http_requests_total', $labels + ['status' => (string) http_response_code()]);
+        \Special\Metrics::observe('special_http_request_duration_seconds', ['route' => $route], microtime(true) - $metricsStartedAt);
+    });
+}
+
 if ($path === '/health') {
     header('Content-Type: application/json; charset=utf-8');
     try {
@@ -107,6 +122,38 @@ try {
     $oauth = new OAuth($store, $security, $config);
 } catch (Throwable) {
     $emitUnavailable(503, $path === '/mcp');
+}
+
+if ($path === '/metrics') {
+    header('Cache-Control: no-store');
+    if ($config['metrics_token'] === '') {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Not found.';
+        exit;
+    }
+    $presented = special_mcp_bearer_token(trim((string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '')));
+    if ($presented === null || !hash_equals(hash('sha256', (string) $config['metrics_token']), hash('sha256', $presented))) {
+        http_response_code(401);
+        header('WWW-Authenticate: Bearer realm="special-metrics"');
+        header('Content-Type: text/plain; charset=utf-8');
+        echo 'Unauthorized.';
+        exit;
+    }
+    $pingStarted = microtime(true);
+    try {
+        $store->ping();
+        $storeUp = 1;
+    } catch (Throwable) {
+        $storeUp = 0;
+    }
+    header('Content-Type: text/plain; version=0.0.4; charset=utf-8');
+    echo \Special\Metrics::render([
+        ['name' => 'special_build_info', 'help' => 'Build information; the value is always 1.', 'labels' => ['version' => (string) $config['version'], 'commit' => (string) $config['commit']], 'value' => 1],
+        ['name' => 'special_store_up', 'help' => '1 when the DynamoDB table answered a probe during this scrape.', 'labels' => [], 'value' => $storeUp],
+        ['name' => 'special_store_probe_seconds', 'help' => 'Duration of the store probe made during this scrape.', 'labels' => [], 'value' => microtime(true) - $pingStarted],
+    ]);
+    exit;
 }
 
 if ($path === '/mcp') {

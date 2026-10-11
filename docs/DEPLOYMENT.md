@@ -33,6 +33,8 @@ All configuration is environment variables with the `SPECIAL_*` prefix. In AWS t
 | `SPECIAL_TRUST_PROXY` | `1` (image), `0` in dev compose | Use `X-Forwarded-For` as the client IP (behind the ALB / proxy) |
 | `SPECIAL_TRUSTED_PROXY_HOPS` | 1 | Which entry from the right of `X-Forwarded-For` is the client: 1 for a single ALB, more only when further trusted proxies sit in front |
 | `SPECIAL_SETUP_TOKEN` | none | Token required by the first-run `/setup` page (20+ characters). Unset = generated once, hashed in the table, written to the log, valid 24 h |
+| `SPECIAL_METRICS_TOKEN` | none | Enables `GET /metrics` (Prometheus) behind this bearer token (20+ characters). Unset = endpoint is 404 and nothing is collected. See [`METRICS.md`](METRICS.md) |
+| `SPECIAL_METRICS_FILE` | container temp dir | Where metric samples are buffered |
 | `SPECIAL_VERSION`, `SPECIAL_COMMIT` | `dev`, `unknown` | Build labels set by the image; shown in the footer, `/health` and `deployment-check` |
 | `SPECIAL_REMEMBER_DAYS` | 60 | "Keep me signed in" lifetime (1–3650) |
 | `SPECIAL_MCP_RESPONSE_BYTES`, `SPECIAL_MCP_REQUEST_BYTES`, `SPECIAL_MCP_MAX_PAGE_SIZE` | 64000, 2000000, 50 | MCP bounds |
