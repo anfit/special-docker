@@ -189,8 +189,16 @@ $idFromSegments = static function (int $index) use ($segments): int {
     return (int) $value;
 };
 
-// A user whose password was reset by an administrator may only reach the account page until they change it.
-if ($principal !== null && $principal->mustChangePassword && !in_array($path, ['/account', '/account/password', '/logout'], true)) {
+$isAccountTokenRevocation = count($segments) === 4
+    && $segments[0] === 'account'
+    && $segments[1] === 'tokens'
+    && preg_match('/^[a-f0-9]{32}$/', $segments[2]) === 1
+    && $segments[3] === 'revoke';
+// A user whose password was reset by an administrator may only reach account actions until they change it.
+if ($principal !== null
+    && $principal->mustChangePassword
+    && !in_array($path, ['/account', '/account/password', '/account/tokens', '/logout'], true)
+    && !$isAccountTokenRevocation) {
     special_redirect('/account');
 }
 
@@ -422,7 +430,7 @@ try {
         if ($method !== 'GET') {
             throw new SpecialException('INVALID_ARGUMENT', 'Method not allowed.', 405);
         }
-        $render('account', ['title' => 'Account']);
+        $render('account', ['title' => 'Account', 'apiTokens' => $security->listApiTokens($actor, $actor->id)]);
         exit;
     }
 
@@ -435,6 +443,38 @@ try {
         $security->changePassword($actor, $actor->id, special_form_string('password', '') ?? '', $requestId);
         special_flash('Your password was changed.', 'info');
         special_redirect('/specs');
+    }
+
+    if ($path === '/account/tokens') {
+        $actor = $requirePrincipal();
+        if ($method !== 'POST') {
+            throw new SpecialException('INVALID_ARGUMENT', 'Method not allowed.', 405);
+        }
+        special_require_csrf(special_form_string('csrf'));
+        $issued = $security->issueApiToken($actor, $actor->id, special_form_string('name', '') ?? '', $requestId);
+        header('Cache-Control: no-store');
+        header('Referrer-Policy: no-referrer');
+        $render('api-token-created', [
+            'title' => 'Bearer token created',
+            'tokenUser' => $issued['user'],
+            'tokenName' => $issued['name'],
+            'bearerToken' => $issued['token'],
+            'isOwnToken' => true,
+            'returnUrl' => '/account',
+            'returnLabel' => 'Back to account',
+        ]);
+        exit;
+    }
+
+    if ($isAccountTokenRevocation) {
+        $actor = $requirePrincipal();
+        if ($method !== 'POST') {
+            throw new SpecialException('INVALID_ARGUMENT', 'Method not allowed.', 405);
+        }
+        special_require_csrf(special_form_string('csrf'));
+        $security->revokeApiToken($actor, $actor->id, $segments[2], $requestId);
+        special_flash('Bearer token revoked.', 'info');
+        special_redirect('/account');
     }
 
     if ($isSharedRoute) {
@@ -602,11 +642,15 @@ try {
         if ($segments[3] === 'tokens') {
             $issued = $security->issueApiToken($actor, $userId, special_form_string('name', '') ?? '', $requestId);
             header('Cache-Control: no-store');
-            $render('admin-api-token', [
+            header('Referrer-Policy: no-referrer');
+            $render('api-token-created', [
                 'title' => 'Bearer token created',
                 'tokenUser' => $issued['user'],
                 'tokenName' => $issued['name'],
                 'bearerToken' => $issued['token'],
+                'isOwnToken' => $actor->id === $userId,
+                'returnUrl' => '/admin/users',
+                'returnLabel' => 'Back to users',
             ]);
             exit;
         }

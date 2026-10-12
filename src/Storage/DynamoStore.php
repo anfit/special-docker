@@ -26,7 +26,7 @@ use Special\SpecialException;
  *   OCODE#<hash>/META         authorization code gsi1: CRED#<user> / CODE#<hash>      (TTL)
  *   OAT#<hash>/META           access token       gsi1: CRED#<user> / AT#<hash>, gsi2: FAMILY#<fam> / AT#<hash> (TTL)
  *   ORT#<hash>/META           refresh token      gsi1: CRED#<user> / RT#<hash>, gsi2: FAMILY#<fam> / RT#<hash> (TTL)
- *   PAT#<hash>/META           admin bearer token gsi1: CRED#<user> / PAT#<token_id>
+ *   PAT#<hash>/META           bearer token       gsi1: CRED#<user> / PAT#<token_id>
  */
 final class DynamoStore implements Store
 {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.2
+
+* **Self-service MCP bearer tokens:** users can create, list, and revoke their own bearer tokens from Account. Administrators can continue managing tokens for every user from the Users page.
+
 ## 1.2.1
 
 * **AWS request latency:** skip the ECS credential provider unless the container credential URI is configured, so EC2 instance-profile lookups do not wait on an unavailable ECS endpoint.

@@ -103,7 +103,7 @@ final class Security
             return null;
         }
         $user = $this->store->getUser((int) $managed['user_id']);
-        // Admin-issued tokens follow the account's current role and remain subject to account lockout.
+        // Managed tokens follow the account's current role and remain subject to account lockout.
         if ($user === null || !(bool) $user['enabled'] || (bool) ($user['must_change_password'] ?? false)) {
             return null;
         }
@@ -195,8 +195,8 @@ final class Security
     /** @return list<array<string, mixed>> */
     public function listApiTokens(Principal $actor, int $userId): array
     {
-        $this->assertPermission($actor, 'users.manage');
         $userId = $this->validateUserId($userId);
+        $this->assertCanManageApiTokens($actor, $userId);
         if ($this->store->getUser($userId) === null) {
             throw new SpecialException('NOT_FOUND', 'User not found.', 404);
         }
@@ -211,8 +211,8 @@ final class Security
     /** @return array{user: array<string, mixed>, name: string, token: string} */
     public function issueApiToken(Principal $actor, int $userId, string $name, ?string $requestId = null): array
     {
-        $this->assertPermission($actor, 'users.manage');
         $userId = $this->validateUserId($userId);
+        $this->assertCanManageApiTokens($actor, $userId);
         $name = trim($name);
         $nameLength = special_string_length($name);
         if ($nameLength === null || $nameLength < 1 || $nameLength > 80) {
@@ -245,8 +245,8 @@ final class Security
 
     public function revokeApiToken(Principal $actor, int $userId, string $tokenId, ?string $requestId = null): void
     {
-        $this->assertPermission($actor, 'users.manage');
         $userId = $this->validateUserId($userId);
+        $this->assertCanManageApiTokens($actor, $userId);
         if (preg_match('/^[a-f0-9]{32}$/', $tokenId) !== 1) {
             throw new SpecialException('NOT_FOUND', 'Bearer token not found.', 404);
         }
@@ -259,6 +259,13 @@ final class Security
             special_now(),
             special_audit_entry($actor, 'user.api_token_revoked', 'user', $userId, ['token_id' => $tokenId], $requestId),
         );
+    }
+
+    private function assertCanManageApiTokens(Principal $actor, int $userId): void
+    {
+        if ($actor->id !== $userId) {
+            $this->assertPermission($actor, 'users.manage');
+        }
     }
 
     /** @return array<string, mixed> */

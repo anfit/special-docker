@@ -20,8 +20,9 @@ Access tokens are short-lived and refresh tokens rotate on use. Authorization
 codes and tokens are bound to the exact configured MCP resource. Reuse of a
 rotated refresh token revokes its complete access/refresh-token family.
 Disabling a user or changing their password revokes stored access and refresh
-tokens. Bearer values are stored only as keyed hashes. Administrators may also
-issue labeled, long-lived MCP bearer tokens from the Users page; see
+tokens. Bearer values are stored only as keyed hashes. Users may also issue
+labeled, long-lived MCP bearer tokens from Account, and administrators can
+manage tokens for any user from the Users page; see
 [`BEARER-TOKENS.md`](BEARER-TOKENS.md). Those tokens inherit the account's
 current role and are revoked when the account is disabled or its password is
 reset.
