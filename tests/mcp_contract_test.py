@@ -96,6 +96,7 @@ class McpContractTest(unittest.TestCase):
         self.assertEqual("https://special.example.test", authorization_server["issuer"])
         self.assertEqual("https://special.example.test/oauth/register", authorization_server["registration_endpoint"])
         self.assertEqual(["S256"], authorization_server["code_challenge_methods_supported"])
+        self.assertEqual(["authorization_code", "refresh_token"], authorization_server["grant_types_supported"])
         self.assertEqual(["model.read", "model.write"], authorization_server["scopes_supported"])
         self.assertTrue(authorization_server["client_id_metadata_document_supported"])
         self.assertEqual("model.read model.write", metadata["default_scope"])

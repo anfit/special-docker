@@ -31,20 +31,25 @@ Clients may use either:
 
 1. `POST /oauth/register` for public dynamic registration; or
 2. an HTTPS Client ID Metadata Document as the `client_id`, including Claude Code's
-   `https://claude.ai/oauth/claude-code-client-metadata` identifier.
+   `https://claude.ai/oauth/claude-code-client-metadata` and GitHub Copilot
+   Desktop's `https://github.com/copilot/desktop/client-metadata.json`
+   identifiers.
 
 Metadata documents are fetched only over public HTTPS, without redirects, with
 a three-second timeout and a 64 KiB response limit. They must declare one to
-ten valid redirect URIs, public token authentication, and only supported grant
-and response types.
+ten valid redirect URIs, public token authentication, the authorization-code
+grant, and the `code` response type. Other grant types advertised by the
+client do not enable those grants on Special. Redirects may use HTTPS,
+loopback HTTP, or a native application's custom URI scheme. Custom-scheme
+redirects are matched exactly for all clients.
 
 Authorization requires `response_type=code`, validates the canonical
 `resource` (and defaults to it when omitted), and requires S256 PKCE. Token
 exchange requires the resource explicitly. A missing scope defaults to
 `model.read model.write`. Loopback
 HTTP callback ports are intentionally ignored for matching, while scheme,
-host, path, and query remain exact. HTTPS callbacks remain exact-string
-matches. Redirect fragments and user-info are rejected.
+host, path, and query remain exact. HTTPS and custom-scheme callbacks remain
+exact-string matches. Redirect fragments and user-info are rejected.
 
 Code exchange revalidates the client, the exact redirect URI used by the
 authorization request, the one-use code, the PKCE verifier, and the canonical
@@ -66,8 +71,10 @@ changes revoke stored grants as well.
 ## Acceptance checks
 
 1. Public discovery succeeds, while unauthenticated `initialize` is challenged.
-2. Dynamic registration accepts valid public clients and rejects unsupported
-   grant, response, redirect, and token-auth metadata.
+2. Dynamic registration accepts supported authorization-code clients, ignores
+   extra advertised client grants, and rejects registrations without the
+   authorization-code grant or with unsupported response, redirect, or
+   token-auth metadata.
 3. A metadata-document client can authorize with an ephemeral localhost port;
    path/query changes and HTTPS port changes are rejected.
 4. Authorization and token exchange require the canonical resource and S256

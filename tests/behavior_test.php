@@ -470,6 +470,30 @@ test('metadata-document and dynamic clients register as public clients', functio
     $stored = $env->oauth->getClient($registered['client_id']);
     check($stored !== null && $stored['enabled'] === true, 'persisted');
     same(['https://app.example.test/cb'], json_decode($stored['redirect_uris'], true), 'redirect URIs persisted');
+
+    $native = $env->oauth->registerDynamicClient([
+        'redirect_uris' => ['github-app://oauth/callback'],
+        'grant_types' => ['authorization_code', 'refresh_token', 'urn:ietf:params:oauth:grant-type:device_code'],
+        'client_name' => 'Native client',
+    ]);
+    $nativeRequest = $env->oauth->validateAuthorizationRequest([
+        'client_id' => $native['client_id'],
+        'redirect_uri' => 'github-app://oauth/callback',
+        'response_type' => 'code',
+        'code_challenge' => str_repeat('a', 43),
+        'code_challenge_method' => 'S256',
+    ]);
+    same('github-app://oauth/callback', $nativeRequest['redirect_uri'], 'native redirect accepted for any public client');
+    same(
+        ['authorization_code', 'refresh_token'],
+        $native['grant_types'],
+        'unimplemented client grants are not advertised as registered grants',
+    );
+    throws('INVALID_ARGUMENT', fn () => $env->oauth->registerDynamicClient([
+        'redirect_uris' => ['github-app://oauth/callback'],
+        'grant_types' => ['urn:ietf:params:oauth:grant-type:device_code'],
+        'client_name' => 'Device-only client',
+    ]), 'server still requires authorization-code grant');
 });
 
 // ------------------------------------------------------------------ remember-me & throttling at the store boundary

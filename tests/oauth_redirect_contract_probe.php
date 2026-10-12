@@ -31,5 +31,19 @@ echo json_encode([
         ['https://client.example/callback'],
         'https://client.example/callback',
     ),
+    'native_custom_scheme_exact' => OAuth::matchesRegisteredRedirect(
+        ['github-app://oauth/callback'],
+        'github-app://oauth/callback',
+    ),
+    'native_custom_scheme_mismatch' => OAuth::matchesRegisteredRedirect(
+        ['github-app://oauth/callback'],
+        'github-app://oauth/other',
+    ),
+    'native_custom_scheme_accepted_generically' => OAuth::validRedirect('my-editor+oauth://login/callback'),
+    'native_private_use_scheme_accepted' => OAuth::matchesRegisteredRedirect(
+        ['com.example.desktop:/oauth/callback'],
+        'com.example.desktop:/oauth/callback',
+    ),
+    'javascript_scheme_rejected' => OAuth::validRedirect('javascript://attacker.example/callback'),
     'userinfo_rejected' => OAuth::validRedirect('https://user:pass@client.example/callback'),
 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);

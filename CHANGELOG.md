@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1
+
+* **OAuth desktop-client interoperability:** accept native-application redirect URI schemes for all clients with exact matching, and accept client metadata that advertises additional grants while continuing to expose only the server's authorization-code and refresh-token grants. This resolves GitHub Copilot Desktop's OAuth Client ID Metadata Document flow.
+
 ## 1.1.0
 
 * **First-run web setup** at `/setup`, guarded by a one-time token (generated and logged once, or `SPECIAL_SETUP_TOKEN`); the CLI bootstrap remains.

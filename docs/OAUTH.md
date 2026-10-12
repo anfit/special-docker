@@ -36,8 +36,13 @@ SPECIAL_OAUTH_CLIENT_SECRET="<secret>" php scripts/register-oauth-client.php --c
 
 External clients may use dynamic registration at `/oauth/register`, the
 Client ID Metadata Document flow, or the CLI for controlled fixed clients.
-Redirect URIs use exact matching except that loopback HTTP ports may vary at
-runtime; HTTPS is required except for localhost development callbacks. The
-token request must include the exact MCP `resource` value (authorization
-requests default to it when omitted). The endpoint and
+For example, GitHub Copilot Desktop uses
+`https://github.com/copilot/desktop/client-metadata.json`. Redirects may use
+HTTPS, loopback HTTP, or a native application's custom URI scheme. Custom
+scheme redirects must match the registered URI exactly; loopback HTTP ports
+may vary at runtime. The authorization server requires S256 PKCE for every
+client and supports only authorization-code and refresh-token grants. Extra
+grant types listed as client capabilities do not enable those grants on the
+server. The token request must include the exact MCP `resource` value
+(authorization requests default to it when omitted). The endpoint and
 resource-link convention is recorded in [`MCP_CONTRACT.md`](MCP_CONTRACT.md).

@@ -186,7 +186,7 @@ final class OAuth
         }
         foreach ($redirectUris as $redirectUri) {
             if (!is_string($redirectUri) || !$this->isAllowedRedirectUri($redirectUri)) {
-                throw new SpecialException('INVALID_ARGUMENT', 'Every redirect URI must be an absolute HTTPS URI or localhost HTTP URI without a fragment.', 422);
+                throw new SpecialException('INVALID_ARGUMENT', 'Every redirect URI must be a valid HTTPS, loopback HTTP, or native-application URI without a fragment or user-info.', 422);
             }
         }
         if ($clientType === 'confidential' && ($clientSecret === null || strlen($clientSecret) < 32)) {
@@ -240,11 +240,8 @@ final class OAuth
             throw new SpecialException('INVALID_ARGUMENT', 'Only public OAuth clients are supported.', 400);
         }
         $grantTypes = $input['grant_types'] ?? ['authorization_code', 'refresh_token'];
-        if (!is_array($grantTypes)
-            || $grantTypes === []
-            || array_filter($grantTypes, static fn (mixed $value): bool => !is_string($value)) !== []
-            || array_diff($grantTypes, ['authorization_code', 'refresh_token']) !== []) {
-            throw new SpecialException('INVALID_ARGUMENT', 'grant_types must contain supported OAuth grants.', 400);
+        if (!$this->validClientGrantTypes($grantTypes)) {
+            throw new SpecialException('INVALID_ARGUMENT', 'grant_types must include authorization_code and contain at most ten bounded values.', 400);
         }
         $responseTypes = $input['response_types'] ?? ['code'];
         if (!is_array($responseTypes)
@@ -268,7 +265,7 @@ final class OAuth
         $clientId = special_b64url_encode(random_bytes(24));
         $registered = $this->registerClient($clientId, $name, $redirectUris, 'public');
         return array_merge($registered, [
-            'grant_types' => array_values(array_unique($grantTypes)),
+            'grant_types' => array_values(array_intersect(array_unique($grantTypes), ['authorization_code', 'refresh_token'])),
             'response_types' => array_values(array_unique($responseTypes)),
             'token_endpoint_auth_method' => 'none',
         ]);
@@ -536,10 +533,7 @@ final class OAuth
 
         $grantTypes = $metadata['grant_types'] ?? ['authorization_code', 'refresh_token'];
         $responseTypes = $metadata['response_types'] ?? ['code'];
-        if (!is_array($grantTypes)
-            || $grantTypes === []
-            || array_filter($grantTypes, static fn (mixed $value): bool => !is_string($value)) !== []
-            || array_diff($grantTypes, ['authorization_code', 'refresh_token']) !== []) {
+        if (!$this->validClientGrantTypes($grantTypes)) {
             return null;
         }
         if (!is_array($responseTypes)
@@ -579,9 +573,24 @@ final class OAuth
             'client_secret_hash' => null,
             'redirect_uris' => json_encode($redirects, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             'enabled' => true,
-            'grant_types' => array_values(array_unique($grantTypes)),
+            'grant_types' => array_values(array_intersect(array_unique($grantTypes), ['authorization_code', 'refresh_token'])),
             'response_types' => array_values(array_unique($responseTypes)),
         ];
+    }
+
+    private function validClientGrantTypes(mixed $grantTypes): bool
+    {
+        return is_array($grantTypes)
+            && array_is_list($grantTypes)
+            && $grantTypes !== []
+            && count($grantTypes) <= 10
+            && array_filter(
+                $grantTypes,
+                static fn (mixed $value): bool => !is_string($value)
+                    || $value === ''
+                    || strlen($value) > 200,
+            ) === []
+            && in_array('authorization_code', $grantTypes, true);
     }
 
     public static function validRedirect(string $uri): bool
@@ -594,14 +603,27 @@ final class OAuth
             || isset($parts['fragment'])
             || isset($parts['user'])
             || isset($parts['pass'])
-            || !isset($parts['scheme'], $parts['host'])) {
+            || !isset($parts['scheme'])) {
             return false;
         }
-        if (strtolower((string) $parts['scheme']) === 'https') {
-            return true;
+        $scheme = strtolower((string) $parts['scheme']);
+        if ($scheme === 'https') {
+            return isset($parts['host']) && (string) $parts['host'] !== '';
         }
-        return strtolower((string) $parts['scheme']) === 'http'
-            && in_array(strtolower((string) $parts['host']), ['localhost', '127.0.0.1', '::1', '[::1]'], true);
+        if ($scheme === 'http') {
+            return isset($parts['host'])
+                && in_array(strtolower((string) $parts['host']), ['localhost', '127.0.0.1', '::1', '[::1]'], true);
+        }
+
+        $unsafeSchemes = [
+            'about', 'blob', 'chrome', 'chrome-extension', 'data', 'edge', 'file',
+            'ftp', 'ftps', 'javascript', 'mailto', 'resource', 'sms', 'tel',
+            'vbscript', 'view-source', 'ws', 'wss',
+        ];
+        return preg_match('/^[a-z][a-z0-9+.-]*$/i', $scheme) === 1
+            && !in_array($scheme, $unsafeSchemes, true)
+            && ((isset($parts['host']) && (string) $parts['host'] !== '')
+                || (isset($parts['path']) && (string) $parts['path'] !== ''));
     }
 
     /**
