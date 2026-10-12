@@ -157,7 +157,7 @@ Resources:
       KeySchema:
         - { AttributeName: pk, KeyType: HASH }
         - { AttributeName: sk, KeyType: RANGE }
-      # Keep the projected attribute list identical to src/Storage/DynamoSchema.php.
+      # Keep the projected attribute list identical to src/Storage/DynamoSchema.php and within DynamoDB's 20-attribute INCLUDE limit.
       GlobalSecondaryIndexes:
         - IndexName: gsi1
           KeySchema:
@@ -166,7 +166,6 @@ Resources:
           Projection:
             ProjectionType: INCLUDE
             NonKeyAttributes:
-              - etype
               - id
               - title
               - description
@@ -194,7 +193,6 @@ Resources:
           Projection:
             ProjectionType: INCLUDE
             NonKeyAttributes:
-              - etype
               - id
               - title
               - description

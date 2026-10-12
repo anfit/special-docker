@@ -12,9 +12,9 @@ final class DynamoSchema
 {
     public const TTL_ATTRIBUTE = 'ttl';
 
-    /** Non-key attributes projected into both GSIs. The spec body is deliberately absent. */
+    /** At most 20 non-key attributes for DynamoDB INCLUDE projections. The spec body and unused etype are omitted. */
     public const PROJECTED_ATTRIBUTES = [
-        'etype', 'id', 'title', 'description', 'project_name', 'status', 'visibility', 'revision',
+        'id', 'title', 'description', 'project_name', 'status', 'visibility', 'revision',
         'created_by', 'updated_by', 'created_at', 'updated_at', 'deleted_at',
         'username', 'role', 'enabled', 'version', 'last_login_at',
         'user_id', 'revoked_at', 'consumed_at',

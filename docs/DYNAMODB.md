@@ -1,6 +1,6 @@
 # DynamoDB design
 
-All persistence is one table (`SPECIAL_DYNAMODB_TABLE`, default `special`) with two global secondary indexes. The table is defined in [`deploy/aws/special-stack.yaml`](../deploy/aws/special-stack.yaml) for AWS and in [`src/Storage/DynamoSchema.php`](../src/Storage/DynamoSchema.php) for DynamoDB Local; the two must stay in sync (a test-free but cheap check: both list the same projected attributes).
+All persistence is one table (`SPECIAL_DYNAMODB_TABLE`, default `special`) with two global secondary indexes. The table is defined in [`deploy/aws/special-stack.yaml`](../deploy/aws/special-stack.yaml) for AWS and in [`src/Storage/DynamoSchema.php`](../src/Storage/DynamoSchema.php) for DynamoDB Local; the two must stay in sync and each INCLUDE projection must remain within DynamoDB's 20 non-key attribute limit.
 
 The application talks to it only through the `Special\Storage\Store` interface; [`DynamoStore`](../src/Storage/DynamoStore.php) is the AWS implementation.
 

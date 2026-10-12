@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+* **AWS request latency:** skip the ECS credential provider unless the container credential URI is configured, so EC2 instance-profile lookups do not wait on an unavailable ECS endpoint.
+* **DynamoDB table creation:** remove the unused `etype` index projection and keep both INCLUDE projections within DynamoDB's 20-attribute limit.
+
 ## 1.2.0
 
 * **Admin-issued MCP bearer tokens:** administrators can create, label, view metadata for, and revoke per-user tokens from the Users page. Plaintext is shown once; only a keyed hash is stored. Tokens follow the user's current role and are revoked when the user is disabled or their password is reset.

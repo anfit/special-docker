@@ -211,16 +211,28 @@ function special_store(?array $config = null): Store
         $arguments['credentials'] = ['key' => getenv('AWS_ACCESS_KEY_ID') ?: 'local', 'secret' => getenv('AWS_SECRET_ACCESS_KEY') ?: 'local'];
     } elseif (!getenv('AWS_ACCESS_KEY_ID')) {
         // EC2 instance profile: cache the short-lived credentials on disk because every PHP request is a fresh process.
+        $providers = [\Aws\Credentials\CredentialProvider::env()];
+        $hasContainerCredentialUri = false;
+        foreach (['AWS_CONTAINER_CREDENTIALS_RELATIVE_URI', 'AWS_CONTAINER_CREDENTIALS_FULL_URI'] as $variable) {
+            $value = getenv($variable);
+            if (($value === false || $value === '') && isset($_SERVER[$variable]) && is_string($_SERVER[$variable])) {
+                $value = $_SERVER[$variable];
+            }
+            if (is_string($value) && trim($value) !== '') {
+                $hasContainerCredentialUri = true;
+                break;
+            }
+        }
+        if ($hasContainerCredentialUri) {
+            $providers[] = \Aws\Credentials\CredentialProvider::ecsCredentials();
+        }
+        $providers[] = \Aws\Credentials\CredentialProvider::cache(
+            \Aws\Credentials\CredentialProvider::instanceProfile(),
+            new \Special\Storage\CredentialCache(sys_get_temp_dir() . '/special-aws-credentials.cache'),
+            'special_instance_profile',
+        );
         $arguments['credentials'] = \Aws\Credentials\CredentialProvider::memoize(
-            \Aws\Credentials\CredentialProvider::chain(
-                \Aws\Credentials\CredentialProvider::env(),
-                \Aws\Credentials\CredentialProvider::ecsCredentials(),
-                \Aws\Credentials\CredentialProvider::cache(
-                    \Aws\Credentials\CredentialProvider::instanceProfile(),
-                    new \Special\Storage\CredentialCache(sys_get_temp_dir() . '/special-aws-credentials.cache'),
-                    'special_instance_profile',
-                ),
-            ),
+            \Aws\Credentials\CredentialProvider::chain(...$providers),
         );
     }
 
