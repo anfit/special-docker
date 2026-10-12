@@ -46,13 +46,13 @@ final class McpAdapter
                 return null;
             }
             if ($method === 'server/discover') {
-                return $this->successResponse($id, [
+                return $this->successResponse($id, $this->cacheHints([
                     'resultType' => 'complete',
                     'supportedVersions' => [(string) $this->config['mcp_discovery_version']],
                     'capabilities' => ['tools' => (object) [], 'resources' => ['listChanged' => false]],
                     '_meta' => ['io.modelcontextprotocol/serverInfo' => ['name' => 'special', 'version' => (string) ($this->config['mcp_server_version'] ?? '1.0.0')]],
                     'instructions' => 'Use the spec tools to collect and manage specification documents. Oversized bodies are available as complete MCP resources through resources/read.',
-                ]);
+                ], 300_000, 'public'));
             }
             if ($method === 'initialize') {
                 $this->security->assertPermission($principal, 'spec.read');
@@ -69,11 +69,14 @@ final class McpAdapter
             }
             if ($method === 'resources/list') {
                 $this->security->assertPermission($principal, 'spec.read');
-                return $this->successResponse($id, ['resultType' => 'complete', 'resources' => []]);
+                return $this->successResponse($id, $this->cacheHints([
+                    'resultType' => 'complete',
+                    'resources' => [],
+                ], 300_000, 'public'));
             }
             if ($method === 'resources/templates/list') {
                 $this->security->assertPermission($principal, 'spec.read');
-                return $this->successResponse($id, [
+                return $this->successResponse($id, $this->cacheHints([
                     'resultType' => 'complete',
                     'resourceTemplates' => [[
                         'uriTemplate' => 'special://specs/{spec_id}/body',
@@ -82,7 +85,7 @@ final class McpAdapter
                         'description' => 'Complete Markdown source body for one Special spec.',
                         'mimeType' => 'text/markdown; charset=utf-8',
                     ]],
-                ]);
+                ], 300_000, 'public'));
             }
             if ($method === 'resources/read') {
                 $this->security->assertPermission($principal, 'spec.read');
@@ -93,7 +96,10 @@ final class McpAdapter
             }
             if ($method === 'tools/list') {
                 $principal = $this->security->assertAuthenticated($principal);
-                return $this->successResponse($id, ['resultType' => 'complete', 'tools' => $this->visibleTools($principal)]);
+                return $this->successResponse($id, $this->cacheHints([
+                    'resultType' => 'complete',
+                    'tools' => $this->visibleTools($principal),
+                ], 0, 'private'));
             }
             if ($method === 'tools/call') {
                 return $this->handleToolCall($id, $params, $principal, $requestId);
@@ -129,7 +135,17 @@ final class McpAdapter
                 'mimeType' => 'text/markdown; charset=utf-8',
                 'text' => $spec['body'] === null ? '' : (string) $spec['body'],
             ]],
+            'ttlMs' => 0,
+            'cacheScope' => 'private',
         ];
+    }
+
+    /** @param array<string, mixed> $result @return array<string, mixed> */
+    private function cacheHints(array $result, int $ttlMs, string $cacheScope): array
+    {
+        $result['ttlMs'] = $ttlMs;
+        $result['cacheScope'] = $cacheScope;
+        return $result;
     }
 
     /** @return list<array<string, mixed>> */

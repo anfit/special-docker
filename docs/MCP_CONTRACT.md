@@ -90,6 +90,12 @@ Every published tool has `additionalProperties: false`, bounded fields, `annotat
 
 Successful tool responses use a complete result envelope with `structuredContent.data` and `structuredContent.meta`. Domain failures use JSON-RPC errors with numeric JSON-RPC codes plus stable application codes such as `UNAUTHENTICATED`, `FORBIDDEN`, `INVALID_ARGUMENT`, `NOT_FOUND`, and `CONFLICT`.
 
+Cacheable discovery, list, and resource-read results include the MCP `ttlMs`
+and `cacheScope` hints. `tools/list` and `resources/read` are private with a
+zero-millisecond TTL because they depend on the caller's permissions or
+accessible spec content. Static discovery and resource catalogs are public
+with a five-minute TTL.
+
 List responses are measured against the complete MCP envelope. If descriptions
 would exceed the configured response budget, the page keeps its bounded item
 count and returns complete compact summaries with `description` explicitly

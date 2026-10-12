@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.3
+
+* **MCP result cache hints:** include `ttlMs` and `cacheScope` on discovery, list, and resource-read results. Personalized tool lists and spec bodies are marked private and immediately stale, fixing Claude Code's strict `tools/list` validation.
+
 ## 1.2.2
 
 * **Self-service MCP bearer tokens:** users can create, list, and revoke their own bearer tokens from Account. Administrators can continue managing tokens for every user from the Users page.
