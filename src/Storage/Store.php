@@ -30,6 +30,7 @@ namespace Special\Storage;
  * access:   token_hash, client_id, user_id, resource, refresh_family, scope, expires_at, revoked_at, created_at
  * refresh:  token_hash, client_id, user_id, resource, refresh_family, scope, expires_at, revoked_at,
  *           replaced_by_hash, last_used_at, created_at
+ * api token: token_hash, token_id, user_id, name, last_four, created_at, created_by, revoked_at
  */
 interface Store
 {
@@ -199,6 +200,18 @@ interface Store
     /** @return array<string, mixed>|null */
     public function getRefreshToken(string $tokenHash): ?array;
 
+    /** @param array<string, mixed> $token @param array<string, mixed> $audit */
+    public function issueApiToken(array $token, array $audit): void;
+
+    /** @return array<string, mixed>|null */
+    public function getApiToken(string $tokenHash): ?array;
+
+    /** @return list<array<string, mixed>> active tokens for one user, newest first */
+    public function listApiTokens(int $userId): array;
+
+    /** Revoke one active token and append its audit entry atomically. */
+    public function revokeApiToken(int $userId, string $tokenId, string $at, array $audit): void;
+
     /**
      * Revoke the presented refresh token and issue its replacement pair in one step.
      * Returns false when the presented token was already revoked (replay).
@@ -211,6 +224,6 @@ interface Store
 
     public function revokeFamily(string $family, string $at): void;
 
-    /** Revoke access/refresh tokens, delete unconsumed codes and remember tokens for a user. */
+    /** Revoke MCP tokens, delete unconsumed codes and remember tokens for a user. */
     public function revokeUserCredentials(int $userId, string $at): void;
 }

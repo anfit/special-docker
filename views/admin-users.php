@@ -29,7 +29,7 @@ declare(strict_types=1);
 </section>
 <h2>Users</h2>
 <table>
-    <thead><tr><th>Username</th><th>Role</th><th>Enabled</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Username</th><th>Role</th><th>Enabled</th><th>MCP bearer tokens</th><th>Actions</th></tr></thead>
     <tbody>
     <?php foreach ($users as $user): ?>
         <tr>
@@ -44,6 +44,27 @@ declare(strict_types=1);
                 </form>
             </td>
             <td><?= $user['enabled'] ? 'Yes' : 'No' ?></td>
+            <td>
+                <?php foreach ($user['api_tokens'] as $token): ?>
+                    <div class="card">
+                        <strong><?= special_escape((string) $token['name']) ?></strong>
+                        <span class="muted"> · ends <?= special_escape((string) $token['last_four']) ?> · created <?= special_escape((string) $token['created_at']) ?></span>
+                        <form class="inline" method="post" action="/admin/users/<?= (int) $user['id'] ?>/tokens/<?= special_escape((string) $token['token_id']) ?>/revoke" data-confirm="Revoke <?= special_escape((string) $token['name']) ?> for <?= special_escape((string) $user['username']) ?>? MCP clients using it will stop working.">
+                            <input type="hidden" name="csrf" value="<?= special_escape(special_csrf_token()) ?>">
+                            <button class="danger" type="submit">Revoke</button>
+                        </form>
+                    </div>
+                <?php endforeach; ?>
+                <?php if ($user['enabled'] && !$user['must_change_password']): ?>
+                    <form method="post" action="/admin/users/<?= (int) $user['id'] ?>/tokens">
+                        <input type="hidden" name="csrf" value="<?= special_escape(special_csrf_token()) ?>">
+                        <label>New token name <input name="name" maxlength="80" required></label>
+                        <button class="secondary" type="submit">Create bearer token</button>
+                    </form>
+                <?php else: ?>
+                    <span class="muted">Enable this user and finish any required password change to create a token.</span>
+                <?php endif; ?>
+            </td>
             <td>
                 <?php if ((int) $user['id'] !== $principal->id): ?>
                     <form class="inline" method="post" action="/admin/users/<?= (int) $user['id'] ?>/reset-password" data-confirm="Reset the password for <?= special_escape((string) $user['username']) ?>? They will be signed out everywhere.">

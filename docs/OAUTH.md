@@ -20,7 +20,11 @@ Access tokens are short-lived and refresh tokens rotate on use. Authorization
 codes and tokens are bound to the exact configured MCP resource. Reuse of a
 rotated refresh token revokes its complete access/refresh-token family.
 Disabling a user or changing their password revokes stored access and refresh
-tokens. Bearer values are stored only as keyed hashes.
+tokens. Bearer values are stored only as keyed hashes. Administrators may also
+issue labeled, long-lived MCP bearer tokens from the Users page; see
+[`BEARER-TOKENS.md`](BEARER-TOKENS.md). Those tokens inherit the account's
+current role and are revoked when the account is disabled or its password is
+reset.
 
 Register a fixed client through the non-public CLI (inside the container: `docker compose exec app ...`):
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+* **Admin-issued MCP bearer tokens:** administrators can create, label, view metadata for, and revoke per-user tokens from the Users page. Plaintext is shown once; only a keyed hash is stored. Tokens follow the user's current role and are revoked when the user is disabled or their password is reset.
+
 ## 1.1.1
 
 * **OAuth desktop-client interoperability:** accept native-application redirect URI schemes for all clients with exact matching, and accept client metadata that advertises additional grants while continuing to expose only the server's authorization-code and refresh-token grants. This resolves GitHub Copilot Desktop's OAuth Client ID Metadata Document flow.

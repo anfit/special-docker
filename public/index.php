@@ -563,7 +563,12 @@ try {
         $actor = $requirePrincipal();
         $security->assertPermission($actor, 'users.manage');
         if ($method === 'GET') {
-            $render('admin-users', ['title' => 'User administration', 'users' => $security->listUsers($actor), 'error' => null]);
+            $users = $security->listUsers($actor);
+            foreach ($users as &$user) {
+                $user['api_tokens'] = $security->listApiTokens($actor, (int) $user['id']);
+            }
+            unset($user);
+            $render('admin-users', ['title' => 'User administration', 'users' => $users, 'error' => null]);
             exit;
         }
         if ($method === 'POST') {
@@ -594,11 +599,38 @@ try {
             $render('admin-password-reset', ['title' => 'Temporary password', 'resetUser' => $reset['user'], 'temporaryPassword' => $reset['temporary_password']]);
             exit;
         }
+        if ($segments[3] === 'tokens') {
+            $issued = $security->issueApiToken($actor, $userId, special_form_string('name', '') ?? '', $requestId);
+            header('Cache-Control: no-store');
+            $render('admin-api-token', [
+                'title' => 'Bearer token created',
+                'tokenUser' => $issued['user'],
+                'tokenName' => $issued['name'],
+                'bearerToken' => $issued['token'],
+            ]);
+            exit;
+        }
         if ($segments[3] === 'enabled') {
             $security->setEnabled($actor, $userId, special_form_string('enabled') === '1', $requestId);
             special_flash('User status updated.', 'info');
             special_redirect('/admin/users');
         }
+    }
+
+    if (count($segments) === 6
+        && $segments[0] === 'admin'
+        && $segments[1] === 'users'
+        && $segments[3] === 'tokens'
+        && $segments[5] === 'revoke') {
+        $actor = $requirePrincipal();
+        $security->assertPermission($actor, 'users.manage');
+        if ($method !== 'POST') {
+            throw new SpecialException('INVALID_ARGUMENT', 'Method not allowed.', 405);
+        }
+        special_require_csrf(special_form_string('csrf'));
+        $security->revokeApiToken($actor, $idFromSegments(2), $segments[4], $requestId);
+        special_flash('Bearer token revoked.', 'info');
+        special_redirect('/admin/users');
     }
 
     throw new SpecialException('NOT_FOUND', 'Not found.', 404);

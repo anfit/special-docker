@@ -35,6 +35,7 @@ Both indexes project the same non-key attributes: everything needed for list vie
 | authorization code | `OCODE#<hash>` | `META` | gsi1: `CRED#<user>` / `CODE#<hash>` | expiry + 1 day |
 | access token | `OAT#<hash>` | `META` | gsi1: `CRED#<user>` / `AT#<hash>`; gsi2: `FAMILY#<f>` / `AT#<hash>` | expiry + 1 day |
 | refresh token | `ORT#<hash>` | `META` | gsi1: `CRED#<user>` / `RT#<hash>`; gsi2: `FAMILY#<f>` / `RT#<hash>` | expiry + 1 day |
+| admin-issued bearer token | `PAT#<hash>` | `META` | gsi1: `CRED#<user>` / `PAT#<token_id>` | |
 
 Timestamps are fixed-width UTC strings (`2026-01-02T03:04:05.123456Z`), so lexicographic order is chronological. `id:12` is the id zero-padded to 12 digits.
 
@@ -47,7 +48,7 @@ Timestamps are fixed-width UTC strings (`2026-01-02T03:04:05.123456Z`), so lexic
 | Projects visible to me | the same two streams, aggregated by lower-cased `project_name` |
 | User by id / username | `GetItem USER#id` / `GetItem USERNAME#lower` then `GetItem` |
 | All users | `Query gsi1 USERS` |
-| Revoke everything of a user | `Query gsi1 CRED#<user>`, then revoke/delete each item |
+| List/revoke user credentials | `Query gsi1 CRED#<user>`, then read/revoke each applicable item |
 | Revoke a refresh family | `Query gsi2 FAMILY#<f>` |
 | Audit trail of an entity | `Query AUDIT#<type>#<id>` descending |
 

@@ -82,22 +82,32 @@ final class Security
             return null;
         }
 
-        $row = $this->store->getAccessToken($this->tokenHash($token));
-        if ($row === null
-            || $row['revoked_at'] !== null
-            || !special_timestamp_is_future((string) $row['expires_at'])
-            || ($row['resource'] !== null && (string) $row['resource'] !== (string) $this->config['mcp_resource'])) {
-            return null;
+        $tokenHash = $this->tokenHash($token);
+        $row = $this->store->getAccessToken($tokenHash);
+        if ($row !== null
+            && $row['revoked_at'] === null
+            && special_timestamp_is_future((string) $row['expires_at'])
+            && ($row['resource'] === null || (string) $row['resource'] === (string) $this->config['mcp_resource'])) {
+            $user = $this->store->getUser((int) $row['user_id']);
+            // A user who must choose a new password cannot use MCP until they have done so on the web.
+            if ($user === null || !(bool) $user['enabled'] || (bool) ($user['must_change_password'] ?? false)) {
+                return null;
+            }
+
+            $scopes = preg_split('/\s+/', trim((string) $row['scope']), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            return $this->principalFromRow($user, $scopes, 'mcp', (string) $row['client_id']);
         }
 
-        $user = $this->store->getUser((int) $row['user_id']);
-        // A user who must choose a new password cannot use MCP until they have done so on the web.
+        $managed = $this->store->getApiToken($tokenHash);
+        if ($managed === null || $managed['revoked_at'] !== null) {
+            return null;
+        }
+        $user = $this->store->getUser((int) $managed['user_id']);
+        // Admin-issued tokens follow the account's current role and remain subject to account lockout.
         if ($user === null || !(bool) $user['enabled'] || (bool) ($user['must_change_password'] ?? false)) {
             return null;
         }
-
-        $scopes = preg_split('/\s+/', trim((string) $row['scope']), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        return $this->principalFromRow($user, $scopes, 'mcp', (string) $row['client_id']);
+        return $this->principalFromRow($user, null, 'mcp');
     }
 
     public function loadPrincipal(int $userId, ?array $scopes = null, string $source = 'web', ?string $clientId = null): ?Principal
@@ -180,6 +190,75 @@ final class Security
     {
         $this->assertPermission($actor, 'users.manage');
         return array_map(fn (array $row): array => $this->publicUser($row), $this->store->listUsers());
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function listApiTokens(Principal $actor, int $userId): array
+    {
+        $this->assertPermission($actor, 'users.manage');
+        $userId = $this->validateUserId($userId);
+        if ($this->store->getUser($userId) === null) {
+            throw new SpecialException('NOT_FOUND', 'User not found.', 404);
+        }
+        return array_map(static fn (array $token): array => [
+            'token_id' => (string) $token['token_id'],
+            'name' => (string) $token['name'],
+            'last_four' => (string) $token['last_four'],
+            'created_at' => (string) $token['created_at'],
+        ], $this->store->listApiTokens($userId));
+    }
+
+    /** @return array{user: array<string, mixed>, name: string, token: string} */
+    public function issueApiToken(Principal $actor, int $userId, string $name, ?string $requestId = null): array
+    {
+        $this->assertPermission($actor, 'users.manage');
+        $userId = $this->validateUserId($userId);
+        $name = trim($name);
+        $nameLength = special_string_length($name);
+        if ($nameLength === null || $nameLength < 1 || $nameLength > 80) {
+            throw new SpecialException('INVALID_ARGUMENT', 'Token name must be between 1 and 80 characters.', 422);
+        }
+        $user = $this->store->getUser($userId);
+        if ($user === null) {
+            throw new SpecialException('NOT_FOUND', 'User not found.', 404);
+        }
+        if (!(bool) $user['enabled'] || (bool) ($user['must_change_password'] ?? false)) {
+            throw new SpecialException('CONFLICT', 'The user must be enabled and finish any required password change before receiving a bearer token.', 409);
+        }
+
+        $token = 'spc_' . special_b64url_encode(random_bytes(32));
+        $this->store->issueApiToken(
+            [
+                'token_hash' => $this->tokenHash($token),
+                'token_id' => bin2hex(random_bytes(16)),
+                'user_id' => $userId,
+                'name' => $name,
+                'last_four' => substr($token, -4),
+                'created_at' => special_now(),
+                'created_by' => $actor->id,
+            ],
+            special_audit_entry($actor, 'user.api_token_issued', 'user', $userId, ['name' => $name], $requestId),
+        );
+
+        return ['user' => $this->publicUser($user), 'name' => $name, 'token' => $token];
+    }
+
+    public function revokeApiToken(Principal $actor, int $userId, string $tokenId, ?string $requestId = null): void
+    {
+        $this->assertPermission($actor, 'users.manage');
+        $userId = $this->validateUserId($userId);
+        if (preg_match('/^[a-f0-9]{32}$/', $tokenId) !== 1) {
+            throw new SpecialException('NOT_FOUND', 'Bearer token not found.', 404);
+        }
+        if ($this->store->getUser($userId) === null) {
+            throw new SpecialException('NOT_FOUND', 'User not found.', 404);
+        }
+        $this->store->revokeApiToken(
+            $userId,
+            $tokenId,
+            special_now(),
+            special_audit_entry($actor, 'user.api_token_revoked', 'user', $userId, ['token_id' => $tokenId], $requestId),
+        );
     }
 
     /** @return array<string, mixed> */

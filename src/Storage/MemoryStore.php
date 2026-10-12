@@ -41,6 +41,7 @@ final class MemoryStore implements Store
             'codes' => [],
             'access' => [],
             'refresh' => [],
+            'api_tokens' => [],
         ];
     }
 
@@ -422,6 +423,51 @@ final class MemoryStore implements Store
         return $this->state['refresh'][$tokenHash] ?? null;
     }
 
+    public function issueApiToken(array $token, array $audit): void
+    {
+        $this->load();
+        $hash = (string) $token['token_hash'];
+        if (isset($this->state['api_tokens'][$hash])) {
+            throw new SpecialException('CONFLICT', 'The bearer token could not be issued.', 409);
+        }
+        $this->state['api_tokens'][$hash] = $token + ['revoked_at' => null];
+        $this->appendAudit($audit);
+        $this->save();
+    }
+
+    public function getApiToken(string $tokenHash): ?array
+    {
+        $this->load();
+        return $this->state['api_tokens'][$tokenHash] ?? null;
+    }
+
+    public function listApiTokens(int $userId): array
+    {
+        $this->load();
+        $tokens = array_values(array_filter(
+            $this->state['api_tokens'],
+            static fn (array $token): bool => (int) $token['user_id'] === $userId && ($token['revoked_at'] ?? null) === null,
+        ));
+        usort($tokens, static fn (array $a, array $b): int => strcmp((string) $b['created_at'], (string) $a['created_at']));
+        return $tokens;
+    }
+
+    public function revokeApiToken(int $userId, string $tokenId, string $at, array $audit): void
+    {
+        $this->load();
+        foreach ($this->state['api_tokens'] as $hash => $token) {
+            if ((int) $token['user_id'] === $userId
+                && (string) $token['token_id'] === $tokenId
+                && ($token['revoked_at'] ?? null) === null) {
+                $this->state['api_tokens'][$hash]['revoked_at'] = $at;
+                $this->appendAudit($audit);
+                $this->save();
+                return;
+            }
+        }
+        throw new SpecialException('NOT_FOUND', 'Bearer token not found.', 404);
+    }
+
     public function rotateRefresh(string $oldHash, string $at, array $access, array $refresh, array $audit): bool
     {
         $this->load();
@@ -461,6 +507,11 @@ final class MemoryStore implements Store
                 if ((int) $token['user_id'] === $userId && $token['revoked_at'] === null) {
                     $this->state[$kind][$hash]['revoked_at'] = $at;
                 }
+            }
+        }
+        foreach ($this->state['api_tokens'] as $hash => $token) {
+            if ((int) $token['user_id'] === $userId && ($token['revoked_at'] ?? null) === null) {
+                $this->state['api_tokens'][$hash]['revoked_at'] = $at;
             }
         }
         foreach ($this->state['codes'] as $hash => $code) {

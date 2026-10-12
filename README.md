@@ -23,6 +23,7 @@ Special is a deliberately narrow application for collecting and managing specifi
 | scrape metrics with Prometheus / Grafana | [`docs/METRICS.md`](docs/METRICS.md) |
 | put it behind the corporate load balancer / TLS | [`docs/EDGE_INTEGRATION.md`](docs/EDGE_INTEGRATION.md) |
 | connect an MCP client | [`docs/MCP_CONTRACT.md`](docs/MCP_CONTRACT.md), [`docs/OAUTH.md`](docs/OAUTH.md) |
+| use an admin-issued MCP bearer token | [`docs/BEARER-TOKENS.md`](docs/BEARER-TOKENS.md) |
 
 ## Behaviour in one paragraph
 
@@ -74,4 +75,4 @@ php tests/behavior_test.php dynamodb
 
 ## Security posture, briefly
 
-Sessions are HTTP-only/SameSite-Strict with CSRF tokens on every form; passwords are hashed with PHP's default algorithm; login attempts are throttled; MCP uses OAuth 2.1 with PKCE, resource-bound tokens and refresh-family revocation; the container has no static AWS credentials and its IAM role is limited to one table, one parameter prefix and one log group; there is no SSH. Report issues privately to the repository owner.
+Sessions are HTTP-only/SameSite-Strict with CSRF tokens on every form; passwords are hashed with PHP's default algorithm; login attempts are throttled; MCP supports OAuth 2.1 with PKCE and admin-issued bearer tokens; the container has no static AWS credentials and its IAM role is limited to one table, one parameter prefix and one log group; there is no SSH. Report issues privately to the repository owner.

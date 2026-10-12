@@ -26,6 +26,7 @@ use Special\SpecialException;
  *   OCODE#<hash>/META         authorization code gsi1: CRED#<user> / CODE#<hash>      (TTL)
  *   OAT#<hash>/META           access token       gsi1: CRED#<user> / AT#<hash>, gsi2: FAMILY#<fam> / AT#<hash> (TTL)
  *   ORT#<hash>/META           refresh token      gsi1: CRED#<user> / RT#<hash>, gsi2: FAMILY#<fam> / RT#<hash> (TTL)
+ *   PAT#<hash>/META           admin bearer token gsi1: CRED#<user> / PAT#<token_id>
  */
 final class DynamoStore implements Store
 {
@@ -1008,6 +1009,106 @@ final class DynamoStore implements Store
         return $this->getToken('ORT#' . $tokenHash);
     }
 
+    /** @param array<string, mixed> $token */
+    private function apiTokenAttributes(array $token): array
+    {
+        return [
+            'pk' => 'PAT#' . $token['token_hash'],
+            'sk' => self::SK,
+            'etype' => 'api_token',
+            'token_hash' => $token['token_hash'],
+            'token_id' => $token['token_id'],
+            'user_id' => (int) $token['user_id'],
+            'name' => $token['name'],
+            'last_four' => $token['last_four'],
+            'created_at' => $token['created_at'],
+            'created_by' => (int) $token['created_by'],
+            'gsi1pk' => 'CRED#' . (int) $token['user_id'],
+            'gsi1sk' => 'PAT#' . $token['token_id'],
+        ];
+    }
+
+    public function issueApiToken(array $token, array $audit): void
+    {
+        $reasons = $this->transact([
+            $this->put($this->apiTokenAttributes($token), ['condition' => 'attribute_not_exists(pk)']),
+            $this->putAudit($audit),
+        ]);
+        if ($this->conditionFailed($reasons, 0)) {
+            throw new SpecialException('CONFLICT', 'The bearer token could not be issued.', 409);
+        }
+        if ($reasons !== null) {
+            throw new SpecialException('INTERNAL_ERROR', 'The bearer token could not be issued.', 500);
+        }
+    }
+
+    public function getApiToken(string $tokenHash): ?array
+    {
+        $result = $this->client->getItem([
+            'TableName' => $this->table,
+            'Key' => $this->key('PAT#' . $tokenHash),
+            'ConsistentRead' => true,
+        ]);
+        if (empty($result['Item'])) {
+            return null;
+        }
+        $row = $this->unmarshal($result['Item']);
+        return [
+            'token_hash' => (string) $row['token_hash'],
+            'token_id' => (string) $row['token_id'],
+            'user_id' => (int) $row['user_id'],
+            'name' => (string) $row['name'],
+            'last_four' => (string) $row['last_four'],
+            'created_at' => (string) $row['created_at'],
+            'created_by' => (int) $row['created_by'],
+            'revoked_at' => isset($row['revoked_at']) ? (string) $row['revoked_at'] : null,
+        ];
+    }
+
+    public function listApiTokens(int $userId): array
+    {
+        $tokens = [];
+        foreach ($this->queryAll('gsi1', 'CRED#' . $userId) as $item) {
+            $sortKey = (string) ($item['gsi1sk']['S'] ?? '');
+            if (!str_starts_with($sortKey, 'PAT#')) {
+                continue;
+            }
+            $hash = substr((string) $item['pk']['S'], strlen('PAT#'));
+            $row = $this->getApiToken($hash);
+            if ($row !== null && (int) $row['user_id'] === $userId && $row['revoked_at'] === null) {
+                $tokens[] = $row;
+            }
+        }
+        usort($tokens, static fn (array $a, array $b): int => strcmp((string) $b['created_at'], (string) $a['created_at']));
+        return $tokens;
+    }
+
+    public function revokeApiToken(int $userId, string $tokenId, string $at, array $audit): void
+    {
+        foreach ($this->queryAll('gsi1', 'CRED#' . $userId) as $item) {
+            $sortKey = (string) ($item['gsi1sk']['S'] ?? '');
+            if ($sortKey !== 'PAT#' . $tokenId || (int) ($item['user_id']['N'] ?? 0) !== $userId) {
+                continue;
+            }
+            $reasons = $this->transact([
+                $this->update(
+                    (string) $item['pk']['S'],
+                    ['revoked_at' => $at],
+                    ['condition' => 'attribute_exists(pk) AND attribute_not_exists(revoked_at)'],
+                ),
+                $this->putAudit($audit),
+            ]);
+            if ($reasons === null) {
+                return;
+            }
+            if ($this->conditionFailed($reasons, 0)) {
+                break;
+            }
+            throw new SpecialException('INTERNAL_ERROR', 'The bearer token could not be revoked.', 500);
+        }
+        throw new SpecialException('NOT_FOUND', 'Bearer token not found.', 404);
+    }
+
     /** @return array<string, mixed>|null */
     private function getToken(string $pk): ?array
     {
@@ -1066,7 +1167,7 @@ final class DynamoStore implements Store
             $pk = $item['pk']['S'];
             $kind = strstr($item['gsi1sk']['S'], '#', true);
             try {
-                if ($kind === 'AT' || $kind === 'RT') {
+                if ($kind === 'AT' || $kind === 'RT' || $kind === 'PAT') {
                     $this->revokeItem($pk, $at);
                 } elseif ($kind === 'RM' || ($kind === 'CODE' && !isset($item['consumed_at']))) {
                     $this->client->deleteItem(['TableName' => $this->table, 'Key' => $this->key($pk)]);
